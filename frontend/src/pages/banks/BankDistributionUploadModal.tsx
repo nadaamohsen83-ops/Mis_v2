@@ -8,7 +8,7 @@ import { useToast } from '../../components/common/Toast';
 import { useCollectionsLocalization } from '../../features/collections/localization/collectionsTranslations';
 import { collectionsService } from '../../features/collections/services/collectionsService';
 import type { BankDistributionImportMapping, BankDistributionImportPreview, BankDistributionImportResult, BankDistributionImportUpload, DistributionCollector } from '../../features/collections/types/collections';
-import { ExcelColumnReview, ExcelDropzone, ExcelPreviewToolbar, ExcelSheetPicker, autoMapImportColumns, bankDistributionImportCatalog, defaultSelectedSheetIndexes, importCopy, sheetNamesFromIndexes } from '../../features/import';
+import { ExcelColumnReview, ExcelDropzone, ExcelPreviewToolbar, ExcelSheetPicker, autoMapImportColumns, bankDistributionImportCatalog, importCopy, pickBestImportSheetIndex, sheetNamesFromIndexes } from '../../features/import';
 import { getApiErrorMessage } from '../../services/apiClient';
 
 const fields = [
@@ -78,11 +78,12 @@ export function BankDistributionUploadModal({ bankId, open, onClose, onCompleted
     setBusy(true);
     try {
       const data = await collectionsService.uploadDistributionImport(bankId, file);
-      const indexes = defaultSelectedSheetIndexes(data.sheets);
+      const indexes = [pickBestImportSheetIndex(bankDistributionImportCatalog, data.sheets)];
       const next = buildMapping(data, indexes);
       setUpload(data); setSelectedSheets(indexes); setMapping(next);
-      const recognized = Boolean(next.columns.CaseNumber || next.columns.AccountReference || next.columns.CustomerCode || next.columns.CustomerName);
-      if (mode === 'FILE' && recognized) {
+      const hasIdentifier = Boolean(next.columns.CaseNumber || next.columns.AccountReference || next.columns.ContractNumber);
+      const hasCollector = Boolean(next.columns.CollectorEmployeeNumber || next.columns.CollectorUsername || next.columns.CollectorEmail || next.columns.CollectorName);
+      if (mode === 'FILE' && hasIdentifier && hasCollector) {
         setPreview(await collectionsService.previewDistributionImport(bankId, data.id, next));
         setStep(2);
       } else {

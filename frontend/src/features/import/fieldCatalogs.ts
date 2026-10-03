@@ -82,15 +82,33 @@ export const bankCustomerImportCatalog: ImportFieldDef[] = [
 ];
 
 export const bankDistributionImportCatalog: ImportFieldDef[] = [
-  { key: 'CaseNumber', en: 'Case Number', ar: 'رقم الحالة', aliases: ['case number', 'case id', 'رقم الحالة'] },
-  { key: 'AccountReference', en: 'Account Reference', ar: 'رقم الحساب', aliases: ['account', 'account no', 'account reference', 'account number', 'رقم الحساب'] },
+  { key: 'CaseNumber', en: 'Case Number', ar: 'رقم الحالة', aliases: ['case number', 'case id', 'case', 'رقم الحالة'] },
+  { key: 'AccountReference', en: 'Account Reference', ar: 'رقم الحساب', aliases: ['account', 'account no', 'account reference', 'account number', 'card number', 'card no', 'card', 'رقم الحساب', 'رقم البطاقة'] },
   { key: 'ContractNumber', en: 'Contract Number', ar: 'رقم العقد', aliases: ['contract', 'contract no', 'contract number', 'رقم العقد'] },
   { key: 'CustomerCode', en: 'Customer Code', ar: 'كود العميل', aliases: ['customer code', 'customer id', 'كود العميل'] },
   { key: 'CustomerName', en: 'Customer Name', ar: 'اسم العميل', aliases: ['customer name', 'name', 'اسم العميل'] },
   { key: 'CollectorEmployeeNumber', en: 'Collector Employee Number', ar: 'رقم الموظف', aliases: ['employee number', 'collector id', 'collector employee', 'رقم الموظف'] },
   { key: 'CollectorUsername', en: 'Collector Username', ar: 'اسم المستخدم', aliases: ['username', 'user name', 'اسم المستخدم'] },
   { key: 'CollectorEmail', en: 'Collector Email', ar: 'البريد', aliases: ['email', 'collector email', 'البريد'] },
-  { key: 'CollectorName', en: 'Collector Name', ar: 'اسم المحصل', aliases: ['collector name', 'collector', 'اسم المحصل', 'المحصل'] },
+  { key: 'CollectorName', en: 'Collector Name', ar: 'اسم المحصل', aliases: ['collector name', 'new collector', 'collector', 'اسم المحصل', 'المحصل الجديد', 'المحصل'] },
+];
+
+export const visitImportCatalog: ImportFieldDef[] = [
+  { key: 'CaseNumber', en: 'Case Number', ar: 'رقم الحالة', required: true, aliases: ['case number', 'case no', 'case id', 'رقم الحالة'] },
+  { key: 'Collector', en: 'Collector', ar: 'المحصل', required: true, aliases: ['collector', 'employee number', 'collector name', 'اسم المحصل', 'رقم الموظف'] },
+  { key: 'VisitDate', en: 'Visit Date', ar: 'تاريخ الزيارة', required: true, aliases: ['visit date', 'date', 'التاريخ', 'تاريخ الزيارة'] },
+  { key: 'VisitTime', en: 'Visit Time', ar: 'وقت الزيارة', required: true, aliases: ['visit time', 'time', 'الوقت', 'وقت الزيارة'] },
+  { key: 'Address', en: 'Address', ar: 'العنوان', aliases: ['address', 'visit address', 'العنوان', 'عنوان الزيارة'] },
+  { key: 'Notes', en: 'Notes', ar: 'ملاحظات', aliases: ['notes', 'ملاحظات', 'ملاحظة'] },
+];
+
+export const excuseImportCatalog: ImportFieldDef[] = [
+  { key: 'EmployeeNumber', en: 'Employee Number', ar: 'رقم الموظف', required: true, aliases: ['employee number', 'employee no', 'emp no', 'رقم الموظف'] },
+  { key: 'ExcuseType', en: 'Excuse Type', ar: 'نوع العذر', required: true, aliases: ['excuse type', 'mission type', 'نوع العذر', 'نوع المأمورية'] },
+  { key: 'Date', en: 'Date', ar: 'التاريخ', required: true, aliases: ['excuse date', 'التاريخ', 'تاريخ العذر'] },
+  { key: 'FromTime', en: 'From Time', ar: 'من الساعة', aliases: ['from time', 'من الساعة', 'وقت البداية'] },
+  { key: 'ToTime', en: 'To Time', ar: 'إلى الساعة', aliases: ['to time', 'إلى الساعة', 'الى الساعة', 'وقت النهاية'] },
+  { key: 'Notes', en: 'Notes', ar: 'ملاحظات', aliases: ['notes', 'ملاحظات', 'ملاحظة'] },
 ];
 
 export const leaveImportCatalog: ImportFieldDef[] = [

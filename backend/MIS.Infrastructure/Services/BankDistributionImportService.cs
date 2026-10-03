@@ -36,7 +36,7 @@ public sealed class BankDistributionImportService(
     private sealed record PreviewSaved(Guid PreviewId, string StorageKey, string Mode, bool ReassignExisting, int TotalRows);
     private sealed record PreviewPayload(BankDistributionImportPreview Preview, BankDistributionImportMapping Mapping);
     private sealed record MatchedCollector(Guid Id, string Name);
-    private sealed record MatchedCase(Guid Id, string CaseNumber, string? AccountReference, string? ContractReference, string CustomerName, Guid? CollectorId, string? CollectorName, bool Assigned);
+    private sealed record MatchedCase(Guid Id, string CaseNumber, string? AccountReference, string? ContractReference, string? CardNumber, string CustomerName, Guid? CollectorId, string? CollectorName, bool Assigned);
 
     private bool Has(string role) => user.Roles.Contains(role, StringComparer.OrdinalIgnoreCase);
     private bool Global => Has(SystemRoleNames.Admin) || Has(SystemRoleNames.CollectionsOperationsManager);
@@ -309,7 +309,7 @@ public sealed class BankDistributionImportService(
         var ar = ApiTextLocalizer.IsArabic;
         return await ScopedCases(organizationId).AsNoTracking()
             .Select(x => new MatchedCase(
-                x.Id, x.CaseNumber, x.AccountReference, x.ContractReference,
+                x.Id, x.CaseNumber, x.AccountReference, x.ContractReference, x.CardNumber,
                 ar ? x.Customer.FullNameArabic ?? x.Customer.FullNameEnglish! : x.Customer.FullNameEnglish ?? x.Customer.FullNameArabic!,
                 x.AssignedCollectorId,
                 x.AssignedCollector == null ? null : x.AssignedCollector.FullName,
@@ -319,29 +319,16 @@ public sealed class BankDistributionImportService(
 
     private static MatchedCase? MatchCase(List<MatchedCase> cases, string caseNumber, string account, string contract, string customerCode, List<string> errors)
     {
-        if (!string.IsNullOrWhiteSpace(caseNumber))
-        {
-            var hits = cases.Where(x => x.CaseNumber.Equals(caseNumber, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (hits.Length == 1) return hits[0];
-            if (hits.Length > 1) { errors.Add("Ambiguous case. / أكثر من حالة مطابقة"); return null; }
-        }
-        if (!string.IsNullOrWhiteSpace(account))
-        {
-            var hits = cases.Where(x => x.AccountReference != null && x.AccountReference.Equals(account, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (hits.Length == 1) return hits[0];
-            if (hits.Length > 1) { errors.Add("Ambiguous case. / أكثر من حالة مطابقة"); return null; }
-        }
-        if (!string.IsNullOrWhiteSpace(contract))
-        {
-            var hits = cases.Where(x => x.ContractReference != null && x.ContractReference.Equals(contract, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (hits.Length == 1) return hits[0];
-            if (hits.Length > 1) { errors.Add("Ambiguous case. / أكثر من حالة مطابقة"); return null; }
-        }
-        if (string.IsNullOrWhiteSpace(caseNumber) && string.IsNullOrWhiteSpace(account) && string.IsNullOrWhiteSpace(contract))
+        _ = customerCode;
+        var hits = DistributionCaseMatcher.Find(
+            cases.Select(item => new DistributionCaseMatcher.Candidate(item.Id, item.CaseNumber, item.AccountReference, item.ContractReference, item.CardNumber)).ToArray(),
+            caseNumber, account, contract);
+        if (hits.Count == 1) return cases.Single(item => item.Id == hits.Single());
+        if (hits.Count > 1) { errors.Add("Ambiguous case. / أكثر من حالة مطابقة"); return null; }
+        if (!DistributionCaseMatcher.HasIdentifier(caseNumber, account, contract))
             errors.Add("Case identifier is required. / معرف الحالة مطلوب");
         else
             errors.Add("Case not found. / الحالة غير موجودة");
-        _ = customerCode;
         return null;
     }
 

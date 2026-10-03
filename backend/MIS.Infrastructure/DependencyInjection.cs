@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<IHrNetSalaryService, HrNetSalaryService>();
         services.AddScoped<IHrAttendanceService, HrAttendanceService>();
         services.AddScoped<IHrExcuseMissionService, HrExcuseMissionService>();
+        services.AddScoped<IExcuseImportService, ExcuseImportService>();
         services.AddScoped<HrMissionSynchronizer>();
         services.AddScoped<IHrAttendanceImportService, HrAttendanceImportService>();
         services.AddScoped<FinanceService>();
