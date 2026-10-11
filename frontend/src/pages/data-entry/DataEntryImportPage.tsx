@@ -13,6 +13,7 @@ import type {
   DataEntryImportMappingRequest,
   DataEntryImportPreview,
   DataEntryImportUpload,
+  DataEntryOrganization,
   DataEntryPortfolio,
   DataEntrySheetPreview,
 } from '../../features/data-entry/types/dataEntry';
@@ -57,7 +58,10 @@ export function DataEntryImportPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [organizationId, setOrganizationId] = useState('');
-  const [portfolio, setPortfolio] = useState<DataEntryPortfolio>();
+  const [portfolioId, setPortfolioId] = useState('');
+  const [organizations, setOrganizations] = useState<DataEntryOrganization[]>([]);
+  const [portfolios, setPortfolios] = useState<DataEntryPortfolio[]>([]);
+  const portfolio = portfolios.find((item) => item.id === portfolioId);
   const [file, setFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<DataEntryImportUpload | null>(null);
   const [sheet, setSheet] = useState<DataEntrySheetPreview | null>(null);
@@ -69,15 +73,29 @@ export function DataEntryImportPage() {
 
   useEffect(() => {
     let cancelled = false;
-    dataEntryService.organizations().then(async (items) => {
-      const org = items[0];
-      if (!org || cancelled) return;
-      setOrganizationId(org.id);
-      const books = await dataEntryService.portfolios(org.id).catch(() => [] as DataEntryPortfolio[]);
-      if (!cancelled) setPortfolio(books[0]);
-    }).catch(() => undefined);
+    dataEntryService.organizations().then((items) => { if (!cancelled) setOrganizations(items); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPortfolios([]);
+    if (!organizationId) return () => { cancelled = true; };
+    dataEntryService.portfolios(organizationId).then((items) => { if (!cancelled) setPortfolios(items); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [organizationId]);
+
+  function updateAssignment(organization: string, selectedPortfolio: DataEntryPortfolio | undefined) {
+    setMapping((current) => current ? {
+      ...current,
+      organizationId: organization,
+      portfolioId: selectedPortfolio?.id ?? null,
+      primaryClassification: selectedPortfolio?.primaryClassification ?? null,
+      subClassification: selectedPortfolio?.subClassification ?? null,
+    } : current);
+    setPreview(null);
+    setConfirmOpen(false);
+  }
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -124,6 +142,37 @@ export function DataEntryImportPage() {
       {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
 
       <Card className="space-y-4 p-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectInput
+            label={d.text('البنك / العميل', 'Bank / Client')}
+            required
+            value={organizationId}
+            onChange={(event) => {
+              const nextOrganizationId = event.target.value;
+              setOrganizationId(nextOrganizationId);
+              setPortfolioId('');
+              setPortfolios([]);
+              updateAssignment(nextOrganizationId, undefined);
+            }}
+          >
+            <option value="">{d.text('اختر البنك', 'Select a bank')}</option>
+            {organizations.map((item) => <option key={item.id} value={item.id}>{d.ar ? item.nameArabic : item.nameEnglish}</option>)}
+          </SelectInput>
+          <SelectInput
+            disabled={!organizationId}
+            label={d.text('المحفظة', 'Portfolio')}
+            required
+            value={portfolioId}
+            onChange={(event) => {
+              const selected = portfolios.find((item) => item.id === event.target.value);
+              setPortfolioId(selected?.id ?? '');
+              updateAssignment(organizationId, selected);
+            }}
+          >
+            <option value="">{d.text('اختر المحفظة', 'Select a portfolio')}</option>
+            {portfolios.map((item) => <option key={item.id} value={item.id}>{d.ar ? item.nameArabic : item.nameEnglish}</option>)}
+          </SelectInput>
+        </div>
         <ExcelDropzone
           arabic={d.ar}
           busy={busy}
@@ -186,12 +235,12 @@ export function DataEntryImportPage() {
         ) : null}
         {upload && mapping ? (
           <Button
-            disabled={busy || nameMissing}
+            disabled={busy || nameMissing || !organizationId || !portfolio}
             fullWidth={false}
             isLoading={busy}
             onClick={() => void run(async () => {
               if (!organizationId || !portfolio) {
-                setError(d.text('تعذر تجهيز الحفظ. أعد فتح الصفحة وحاول مرة أخرى.', 'Could not prepare the save. Reopen the page and try again.'));
+                setError(d.text('اختر البنك والمحفظة قبل حفظ العملاء.', 'Select a bank and portfolio before saving clients.'));
                 return;
               }
               const payload: DataEntryImportMappingRequest = {

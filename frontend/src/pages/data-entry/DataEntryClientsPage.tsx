@@ -10,11 +10,12 @@ import { Modal } from '../../components/common/Modal';
 import { PageHeader } from '../../components/common/PageHeader';
 import { useToast } from '../../components/common/Toast';
 import { TextAreaInput } from '../../components/forms/TextAreaInput';
+import { SelectInput } from '../../components/forms/SelectInput';
 import { TextInput } from '../../components/forms/TextInput';
 import { EditClientSheetModal } from '../../features/data-entry/EditClientSheetModal';
 import { useDataEntryText } from '../../features/data-entry/dataEntryUi';
 import { dataEntryService } from '../../features/data-entry/services/dataEntryService';
-import type { DataEntryClientListItem, DataEntryPortfolio } from '../../features/data-entry/types/dataEntry';
+import type { DataEntryClientListItem, DataEntryOrganization, DataEntryPortfolio } from '../../features/data-entry/types/dataEntry';
 import { getApiErrorMessage } from '../../services/apiClient';
 
 export function DataEntryClientsPage() {
@@ -323,6 +324,8 @@ function PhoneList({ numbers }: { numbers: string[] }) {
 function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const d = useDataEntryText();
   const [organizationId, setOrganizationId] = useState('');
+  const [organizations, setOrganizations] = useState<DataEntryOrganization[]>([]);
+  const [portfolios, setPortfolios] = useState<DataEntryPortfolio[]>([]);
   const [portfolioId, setPortfolioId] = useState('');
   const [primaryClassification, setPrimaryClassification] = useState('');
   const [subClassification, setSubClassification] = useState('');
@@ -340,19 +343,17 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   useEffect(() => {
     let cancelled = false;
-    dataEntryService.organizations().then(async (items) => {
-      const org = items[0];
-      if (!org || cancelled) return;
-      setOrganizationId(org.id);
-      const books = await dataEntryService.portfolios(org.id).catch(() => [] as DataEntryPortfolio[]);
-      const book = books[0];
-      if (!book || cancelled) return;
-      setPortfolioId(book.id);
-      setPrimaryClassification(book.primaryClassification ?? '');
-      setSubClassification(book.subClassification ?? '');
-    }).catch(() => undefined);
+    dataEntryService.organizations().then((items) => { if (!cancelled) setOrganizations(items); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPortfolios([]);
+    if (!organizationId) return () => { cancelled = true; };
+    dataEntryService.portfolios(organizationId).then((items) => { if (!cancelled) setPortfolios(items); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [organizationId]);
 
   const deskReady = Boolean(organizationId && portfolioId);
 
@@ -410,6 +411,35 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
       </p>
       <form className="grid gap-4 sm:grid-cols-2" id="add-data-entry-client" onSubmit={(event) => void submit(event)}>
         {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{error}</div> : null}
+        <SelectInput
+          label={d.text('البنك / العميل', 'Bank / Client')}
+          required
+          value={organizationId}
+          onChange={(event) => {
+            setOrganizationId(event.target.value);
+            setPortfolioId('');
+            setPrimaryClassification('');
+            setSubClassification('');
+          }}
+        >
+          <option value="">{d.text('اختر البنك', 'Select a bank')}</option>
+          {organizations.map((item) => <option key={item.id} value={item.id}>{d.ar ? item.nameArabic : item.nameEnglish}</option>)}
+        </SelectInput>
+        <SelectInput
+          disabled={!organizationId}
+          label={d.text('المحفظة', 'Portfolio')}
+          required
+          value={portfolioId}
+          onChange={(event) => {
+            const selected = portfolios.find((item) => item.id === event.target.value);
+            setPortfolioId(selected?.id ?? '');
+            setPrimaryClassification(selected?.primaryClassification ?? '');
+            setSubClassification(selected?.subClassification ?? '');
+          }}
+        >
+          <option value="">{d.text('اختر المحفظة', 'Select a portfolio')}</option>
+          {portfolios.map((item) => <option key={item.id} value={item.id}>{d.ar ? item.nameArabic : item.nameEnglish}</option>)}
+        </SelectInput>
         <TextInput containerClassName="sm:col-span-2" label={d.text('اسم العميل', 'Customer name')} required value={customerName} onChange={(event) => setCustomerName(event.target.value)} />
         <TextInput label={d.text('الرقم القومي', 'National ID')} value={nationalId} onChange={(event) => setNationalId(event.target.value)} />
         <TextInput label={d.text('الموبايل', 'Mobile')} type="tel" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} />

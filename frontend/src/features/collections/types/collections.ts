@@ -38,10 +38,15 @@ export interface BankCustomerLinkSummary { module: string; id: string; title: st
 export interface BankCustomerDetails {
   id: string; customerCode: string; customerName: string; fullNameArabic?: string | null; fullNameEnglish?: string | null;
   mobile?: string | null; alternativeMobile?: string | null; nationalId?: string | null; address?: string | null; secondaryAddress?: string | null;
-  governorate?: string | null; area?: string | null; organizationName: string; organizationType: string;
+  governorate?: string | null; area?: string | null; feedback?: string | null; notes?: string | null; organizationName: string; organizationType: string;
   totalOriginalAmount: number; totalOutstandingAmount: number; totalPaidAmount: number; totalRemainingAmount: number; totalOverdueAmount: number;
   cases: BankCustomerCaseSummary[]; payments: BankCustomerLinkSummary[]; promises: BankCustomerLinkSummary[];
   visits: BankCustomerLinkSummary[]; complaints: BankCustomerLinkSummary[]; activities: BankCustomerLinkSummary[]; timeline: BankCustomerLinkSummary[];
+  dataEntryRecords: BankCustomerDataEntryRecord[];
+}
+export interface BankCustomerDataEntryRecord {
+  batchNumber: string; batchStatus: string; portfolioName: string; accountNumber?: string | null; contractNumber?: string | null;
+  feedback?: string | null; notes?: string | null; phones: string[]; fields: Record<string, string>;
 }
 export interface BankCustomerImportSheet { sheetName?: string | null; suggestedHeaderRowNumber: number; detectedColumns: string[] }
 export interface BankCustomerImportUpload { id: string; fileName: string; sheets: BankCustomerImportSheet[] }
