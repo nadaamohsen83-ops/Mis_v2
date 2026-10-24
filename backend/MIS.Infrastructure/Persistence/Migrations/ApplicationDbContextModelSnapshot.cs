@@ -71,6 +71,14 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<Guid?>("RecurringExpenseId")
                         .HasColumnType("uuid");
 
@@ -322,6 +330,21 @@ namespace MIS.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("EmployeePayrollStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset?>("EmployeePayrollStatusChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("EmployeePayrollStatusChangedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EmployeePayrollStatusReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<decimal>("NetSalary")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -358,6 +381,8 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.HasIndex("CompensationSnapshotId");
 
                     b.HasIndex("EmployeeId");
+
+                    b.HasIndex("EmployeePayrollStatusChangedByUserId");
 
                     b.HasIndex("PeriodId", "EmployeeId")
                         .IsUnique();
@@ -6330,6 +6355,11 @@ namespace MIS.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MIS.Domain.Entities.User", "EmployeePayrollStatusChangedByUser")
+                        .WithMany()
+                        .HasForeignKey("EmployeePayrollStatusChangedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("MIS.Domain.Entities.AccountingPayrollPeriod", "Period")
                         .WithMany("Payrolls")
                         .HasForeignKey("PeriodId")
@@ -6339,6 +6369,8 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Navigation("CompensationSnapshot");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("EmployeePayrollStatusChangedByUser");
 
                     b.Navigation("Period");
                 });

@@ -38,10 +38,13 @@ public sealed class AccountingEmployeePayrollConfiguration : IEntityTypeConfigur
         b.Property(x => x.NetSalary).HasPrecision(18, 2);
         b.Property(x => x.Status).HasMaxLength(40).IsRequired();
         b.Property(x => x.Notes).HasMaxLength(1000);
+        b.Property(x => x.EmployeePayrollStatus).HasMaxLength(40).IsRequired();
+        b.Property(x => x.EmployeePayrollStatusReason).HasMaxLength(1000);
         b.HasIndex(x => new { x.PeriodId, x.EmployeeId }).IsUnique();
         b.HasOne(x => x.Period).WithMany(x => x.Payrolls).HasForeignKey(x => x.PeriodId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.CompensationSnapshot).WithMany().HasForeignKey(x => x.CompensationSnapshotId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.EmployeePayrollStatusChangedByUser).WithMany().HasForeignKey(x => x.EmployeePayrollStatusChangedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

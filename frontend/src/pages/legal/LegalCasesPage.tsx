@@ -1,4 +1,4 @@
-import { Scale, Search } from 'lucide-react';
+import { Scale, Search, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/common/Button';
@@ -8,6 +8,7 @@ import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { PageHeader } from '../../components/common/PageHeader';
 import { Pagination } from '../../components/common/Pagination';
 import { ProfessionalSelect } from '../../components/forms/ProfessionalSelect';
+import { LegalCasesImportModal } from '../../features/legal/components/LegalCasesImportModal';
 import { LegalStageBadge, useLegalText } from '../../features/legal/legalUi';
 import { legalService } from '../../features/legal/services/legalService';
 import type { LegalCaseListItem, LegalOrganization } from '../../features/legal/types/legal';
@@ -26,6 +27,9 @@ export function LegalCasesPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [organizations, setOrganizations] = useState<LegalOrganization[]>([]);
+  const [canManage, setCanManage] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -36,6 +40,14 @@ export function LegalCasesPage() {
 
   useEffect(() => {
     legalService.organizations().then(setOrganizations).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    legalService.dashboard()
+      .then((result) => { if (!cancelled) setCanManage(result.canManage); })
+      .catch(() => { if (!cancelled) setCanManage(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -52,13 +64,18 @@ export function LegalCasesPage() {
       .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [query, organizationId, stage, page, pageSize]);
+  }, [query, organizationId, stage, page, pageSize, refreshVersion]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title={l.text('القضايا القانونية', 'Legal cases')}
         description={l.text('طابور الشركة بالكامل: كل حالة تحصيل بحالة LEGAL. لا يُقيَّد الطابور بمحصل معيّن.', 'Firm-wide queue: every collection case with LEGAL status. It is not scoped to a collector.')}
+        actions={canManage ? (
+          <Button fullWidth={false} leftIcon={<Upload />} onClick={() => setImportOpen(true)}>
+            {l.text('رفع ملف قضايا', 'Upload Legal Cases File')}
+          </Button>
+        ) : undefined}
       />
 
       <div className="grid gap-3 rounded-2xl border border-mis-border bg-white p-4 shadow-sm lg:grid-cols-[minmax(0,1.4fr)_minmax(0,12rem)_minmax(0,12rem)_auto]">
@@ -143,6 +160,11 @@ export function LegalCasesPage() {
           )}
         </div>
       )}
+      <LegalCasesImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => setRefreshVersion((value) => value + 1)}
+      />
     </div>
   );
 }

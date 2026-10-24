@@ -2,6 +2,22 @@ namespace MIS.Domain.Constants;
 
 public static class AccountingValues
 {
+    public static class EmployeePayrollStatuses
+    {
+        public const string Active = "ACTIVE";
+        public const string UnpaidLeave = "UNPAID_LEAVE";
+        public const string Suspended = "SUSPENDED";
+        public const string Terminated = "TERMINATED";
+        public static readonly string[] All = [Active, UnpaidLeave, Suspended, Terminated];
+    }
+
+    public static class PayrollPaymentStatuses
+    {
+        public const string Ready = "READY";
+        public const string Paid = "PAID";
+        public const string NotPayable = "NOT_PAYABLE";
+    }
+
     public static class PayrollStatuses
     {
         public const string Draft = "DRAFT";

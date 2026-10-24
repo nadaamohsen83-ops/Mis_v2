@@ -81,11 +81,10 @@ public sealed partial class AccountingBookService
         }
         if (all || report == "advances")
         {
-            var entries = await AdvancesAsync(to, filter.Search, null, token);
-            if (filter.Category == "CARRIED_ADVANCE") entries = entries.Where(x => x.Carried).ToArray();
-            if (filter.Status == "OPEN") entries = entries.Where(x => x.Remaining > 0).ToArray();
-            if (filter.Status == "SETTLED") entries = entries.Where(x => x.Remaining == 0).ToArray();
-            Add(T("السلف والمرحلة", "Advances and balances"), [T("المستند", "Document"), T("الموظف", "Employee"), T("تاريخ السلفة", "Date"), T("المبلغ الأصلي", "Original amount"), T("المسدد", "Repaid"), T("المتبقي", "Outstanding"), T("مرحلة", "Carried")], entries.Select(x => new object?[] { x.DocumentNumber, x.EmployeeName, x.Date, x.Amount, x.Repaid, x.Remaining, x.Carried }));
+            var entries = await AdvancesAsync(new(from, to, filter.EmployeeName ?? filter.Search, filter.EmployeeNumber ?? filter.Search, filter.DepartmentId, filter.Status), token);
+            Add(T("السلف والتسويات", "Advances and settlements"),
+                [T("كود الموظف", "Employee Code"), T("اسم الموظف", "Employee Name"), T("الإدارة", "Department"), T("رقم المستند", "Document"), T("تاريخ السلفة", "Advance Date"), T("أصل السلفة", "Original Amount"), T("إجمالي المسدد", "Total Paid"), T("المتبقي", "Remaining"), T("سبب السلفة", "Advance Reason"), T("الحالة", "Status")],
+                entries.Items.Select(x => new object?[] { x.EmployeeNumber, x.EmployeeName, x.DepartmentName, x.DocumentNumber, x.Date, x.Amount, x.Repaid, x.Remaining, x.Reason, AdvanceStatusName(x.Status, ar) }));
         }
         if (all || report == "recurring")
         {
@@ -182,5 +181,12 @@ public sealed partial class AccountingBookService
         "POSTED" => ar ? "مسجل" : "Recorded", "REVERSED" => ar ? "معكوس" : "Reversed",
         "PAID" => ar ? "تم الصرف" : "Paid", "CANCELLED" => ar ? "ملغي" : "Cancelled",
         "REJECTED" => ar ? "مرفوض" : "Rejected", _ => status
+    };
+    private static string AdvanceStatusName(string status, bool ar) => status switch
+    {
+        "OPEN" => ar ? "مفتوحة" : "Open",
+        "PARTIAL" => ar ? "مسددة جزئياً" : "Partially Settled",
+        "SETTLED" => ar ? "مسددة بالكامل" : "Fully settled",
+        _ => status
     };
 }

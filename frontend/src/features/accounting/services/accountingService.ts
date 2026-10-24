@@ -26,11 +26,20 @@ export const accountingService = {
   generatePayroll(year: number, month: number, notes?: string) {
     return apiClient.post<AccountingPayrollPeriod>('/accounting/salaries/generate', { year, month, notes }).then((r) => r.data);
   },
-  salaries(periodId: string, search?: string, status?: string) {
-    return loadAllPages((page, pageSize) => apiClient.get<AccountingPaged<AccountingEmployeePayroll>>('/accounting/salaries', { params: { periodId, search: search || undefined, status: status || undefined, page, pageSize } }).then((r) => r.data), 200);
+  salaries(periodId: string, search?: string, paymentStatus?: string, employeeStatus?: string) {
+    return loadAllPages((page, pageSize) => apiClient.get<AccountingPaged<AccountingEmployeePayroll>>('/accounting/salaries', { params: { periodId, search: search || undefined, status: paymentStatus || undefined, employeeStatus: employeeStatus || undefined, page, pageSize } }).then((r) => r.data), 200);
   },
   salary(id: string) {
     return apiClient.get<AccountingEmployeePayroll>(`/accounting/salaries/${id}`).then((r) => r.data);
+  },
+  changeEmployeePayrollStatus(id: string, status: string, reason?: string) {
+    return apiClient.put<AccountingEmployeePayroll>(`/accounting/salaries/${id}/employee-status`, { status, reason: reason || undefined }).then((r) => r.data);
+  },
+  bulkChangeEmployeePayrollStatus(payrollIds: string[], status: string, reason?: string) {
+    return apiClient.post<AccountingEmployeePayroll[]>('/accounting/salaries/employee-status/bulk', { payrollIds, status, reason: reason || undefined }).then((r) => r.data);
+  },
+  bulkPaySalaries(payrollIds: string[]) {
+    return apiClient.post<AccountingEmployeePayroll[]>('/accounting/salaries/pay/bulk', { payrollIds }).then((r) => r.data);
   },
   updateSalary(id: string, body: { transportation: number; commissions: number; bonuses: number; deductions: number; otherAdjustments: number; notes?: string }) {
     return apiClient.put<AccountingEmployeePayroll>(`/accounting/salaries/${id}`, body).then((r) => r.data);

@@ -3,13 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using MIS.API.Authorization;
 using MIS.Application.DTOs.Legal;
 using MIS.Application.Interfaces;
+using MIS.Application.Common;
 
 namespace MIS.API.Controllers;
 
 [ApiController]
 [Route("api/legal")]
 [Authorize]
-public sealed class LegalController(ILegalService legal) : ControllerBase
+public sealed class LegalController(ILegalService legal, ILegalCaseImportService imports) : ControllerBase
 {
     [HttpGet("dashboard")]
     [Authorize(Policy = AuthorizationPolicies.LegalAccess)]
@@ -37,4 +38,30 @@ public sealed class LegalController(ILegalService legal) : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
     public Task<LegalCaseDetailsDto> RecordAction(Guid collectionCaseId, [FromBody] RecordLegalActionRequest request, CancellationToken token)
         => legal.RecordActionAsync(collectionCaseId, request, token);
+
+    [HttpGet("imports/template")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public IActionResult ImportTemplate() =>
+        File(imports.BuildTemplate(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Legal_Cases_Import_Template.xlsx");
+
+    [HttpPost("imports/preview")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(ExcelImportLimits.RequestBytes)]
+    public async Task<LegalImportPreviewDto> PreviewImport(IFormFile file, CancellationToken token)
+    {
+        if (file is null) throw new HrValidationException("Select a legal cases import file.");
+        await using var stream = file.OpenReadStream();
+        return await imports.PreviewAsync(file.FileName, file.Length, stream, token);
+    }
+
+    [HttpPost("imports")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public Task<LegalImportResultDto> Import([FromBody] LegalImportRequest request, CancellationToken token)
+        => imports.ImportAsync(request, token);
+
+    [HttpGet("imports/history")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public Task<IReadOnlyCollection<LegalImportHistoryDto>> ImportHistory(CancellationToken token)
+        => imports.GetHistoryAsync(token);
 }

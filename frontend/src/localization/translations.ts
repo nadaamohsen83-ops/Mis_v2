@@ -1,4 +1,6 @@
 import { coreHrTranslations } from './coreHrTranslations';
+import { financeAdvancesTranslations } from './financeAdvancesTranslations';
+import { datePickerTranslations } from './datePickerTranslations';
 
 export const translations = {
   en: {
@@ -24,6 +26,8 @@ export const translations = {
     emergencyContact: 'Emergency Contact', emergencyContactHelp: 'Primary contact to use in an emergency', contactName: 'Contact Name', relationship: 'Relationship', alternativeNumber: 'Alternative Number', emergencyRequiredFields: 'Contact name, relationship, and mobile number are required.', emergencySavedSuccess: 'Emergency contact saved.', saveEmergencyError: 'Unable to save emergency contact.',
     auditHistory: 'Audit History', auditHistoryHelp: 'Important changes recorded for this employee', searchAudit: 'Search employee history...', loadAuditError: 'Unable to load audit history.', auditUnavailable: 'Audit history unavailable', noAuditRecords: 'No audit records', noAuditHelp: 'Recorded changes for this employee will appear here.', changedBy: 'Changed by {user}', auditEmployeeCreated: 'Employee Created', auditEmployeeUpdated: 'Employee Updated', auditPersonalUpdated: 'Personal Information Updated', auditContactUpdated: 'Contact Information Updated', auditEmploymentUpdated: 'Employment Information Updated', auditContractUpdated: 'Contract Information Updated', auditCompensationUpdated: 'Compensation Information Updated', auditEmergencyUpdated: 'Emergency Contact Updated', auditStatusChanged: 'Employee Status Changed',
     ...coreHrTranslations.en,
+    ...financeAdvancesTranslations.en,
+    ...datePickerTranslations.en,
   },
   ar: {
     socialInsurance: 'التأمينات الاجتماعية',
@@ -48,6 +52,8 @@ export const translations = {
     emergencyContact: 'جهة اتصال الطوارئ', emergencyContactHelp: 'جهة الاتصال الأساسية المستخدمة في حالات الطوارئ', contactName: 'اسم جهة الاتصال', relationship: 'صلة القرابة', alternativeNumber: 'رقم بديل', emergencyRequiredFields: 'اسم جهة الاتصال وصلة القرابة ورقم الهاتف مطلوبة.', emergencySavedSuccess: 'تم حفظ جهة اتصال الطوارئ.', saveEmergencyError: 'تعذر حفظ جهة اتصال الطوارئ.',
     auditHistory: 'سجل التعديلات', auditHistoryHelp: 'التغييرات المهمة المسجلة لهذا الموظف', searchAudit: 'ابحث في سجل الموظف...', loadAuditError: 'تعذر تحميل سجل التعديلات.', auditUnavailable: 'سجل التعديلات غير متاح', noAuditRecords: 'لا توجد تعديلات مسجلة', noAuditHelp: 'ستظهر هنا التغييرات المسجلة لهذا الموظف.', changedBy: 'تم التغيير بواسطة {user}', auditEmployeeCreated: 'تم إنشاء الموظف', auditEmployeeUpdated: 'تم تحديث الموظف', auditPersonalUpdated: 'تم تحديث البيانات الشخصية', auditContactUpdated: 'تم تحديث بيانات التواصل', auditEmploymentUpdated: 'تم تحديث بيانات العمل', auditContractUpdated: 'تم تحديث بيانات العقد', auditCompensationUpdated: 'تم تحديث بيانات الراتب', auditEmergencyUpdated: 'تم تحديث جهة اتصال الطوارئ', auditStatusChanged: 'تم تغيير حالة الموظف',
     ...coreHrTranslations.ar,
+    ...financeAdvancesTranslations.ar,
+    ...datePickerTranslations.ar,
   }
 } as const;
 

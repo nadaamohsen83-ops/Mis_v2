@@ -82,14 +82,15 @@ public sealed partial class AccountingService(
 
         var removedPayrolls = await db.AccountingEmployeePayrolls.Where(x => x.PeriodId == period.Id && x.Status == "DELETED").ToListAsync(token);
         if (removedPayrolls.Count > 0) { db.AccountingEmployeePayrolls.RemoveRange(removedPayrolls); await db.SaveChangesAsync(token); }
+        var monthStart = new DateOnly(period.Year, period.Month, 1);
         var monthEnd = period.MonthEnd;
         var existing = await db.AccountingEmployeePayrolls.Where(x => x.PeriodId == period.Id).Select(x => x.EmployeeId).ToListAsync(token);
         var existingSet = existing.ToHashSet();
         var employees = await db.Employees.AsNoTracking().Include(x => x.Department).Include(x => x.Position)
-            .Where(x => !x.IsArchived && x.Status == Employee.ActiveStatus)
+            .Where(x => !x.IsArchived && (x.HireDate == null || x.HireDate <= monthEnd))
             .ToListAsync(token);
         var comps = await db.EmployeeCompensations.AsNoTracking()
-            .Where(x => x.EffectiveFrom <= monthEnd && (x.EffectiveTo == null || x.EffectiveTo >= monthEnd))
+            .Where(x => x.EffectiveFrom <= monthEnd)
             .OrderByDescending(x => x.EffectiveFrom)
             .ToListAsync(token);
         var now = DateTimeOffset.UtcNow;
@@ -97,12 +98,20 @@ public sealed partial class AccountingService(
         foreach (var employee in employees)
         {
             if (existingSet.Contains(employee.Id)) continue;
-            var comp = comps.FirstOrDefault(c => c.EmployeeId == employee.Id);
+            var compensationDate = employee.TerminationDate.HasValue && employee.TerminationDate.Value < monthEnd
+                ? employee.TerminationDate.Value
+                : monthEnd;
+            if (employee.TerminationDate.HasValue && employee.TerminationDate.Value < monthStart)
+                compensationDate = employee.TerminationDate.Value;
+            var comp = comps.FirstOrDefault(c => c.EmployeeId == employee.Id
+                && c.EffectiveFrom <= compensationDate
+                && (!c.EffectiveTo.HasValue || c.EffectiveTo.Value >= compensationDate));
             if (comp is null) continue; // do not invent salary
             var name = string.IsNullOrWhiteSpace(employee.FullNameArabic) ? employee.FullName : employee.FullNameArabic!;
+            var employeePayrollStatus = ResolveEmployeePayrollStatus(employee, monthEnd);
             db.AccountingEmployeePayrolls.Add(new AccountingEmployeePayroll(
                 period.Id, employee.Id, employee.EmployeeNumber, name, employee.Department?.Name,
-                employee.Position?.NameArabic ?? employee.Position?.Code, comp.BasicSalary, comp.Allowances, comp.Id, now));
+                employee.Position?.NameArabic ?? employee.Position?.Code, comp.BasicSalary, comp.Allowances, comp.Id, now, employeePayrollStatus));
             added++;
         }
         await WriteAudit("AccountingPayrollGenerated", nameof(AccountingPayrollPeriod), period.Id.ToString(), null, null, new { added }, $"Generated {added} salary rows.", token);
@@ -113,14 +122,41 @@ public sealed partial class AccountingService(
         return result;
     }
 
-    public async Task<AccountingPayrollPageDto> ListPayrollsAsync(Guid periodId, string? search, string? status, int page, int pageSize, CancellationToken token)
+    public async Task<AccountingPayrollPageDto> ListPayrollsAsync(Guid periodId, string? search, string? status, string? employeeStatus, int page, int pageSize, CancellationToken token)
     {
         EnsureAccess(); ValidatePage(page, pageSize);
         var period = await db.AccountingPayrollPeriods.AsNoTracking().SingleOrDefaultAsync(x => x.Id == periodId, token)
             ?? throw new HrNotFoundException("Payroll period was not found.");
         await hrPayroll.GetSheetAsync(period.Year, period.Month, token);
         var q = db.AccountingEmployeePayrolls.AsNoTracking().Where(x => x.PeriodId == periodId && x.Status != "DELETED");
-        if (!string.IsNullOrWhiteSpace(status)) q = status.Trim().ToUpperInvariant() == "READY" ? q.Where(x => x.Status == "DRAFT" || x.Status == "PENDING_REVIEW" || x.Status == "PENDING" || x.Status == "APPROVED") : q.Where(x => x.Status == status.Trim().ToUpperInvariant());
+        if (!string.IsNullOrWhiteSpace(employeeStatus))
+        {
+            var selectedEmployeeStatus = NormalizeEmployeePayrollStatus(employeeStatus);
+            q = q.Where(x => x.EmployeePayrollStatus == selectedEmployeeStatus);
+        }
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var selectedPaymentStatus = status.Trim().ToUpperInvariant();
+            var periodStart = new DateOnly(period.Year, period.Month, 1);
+            if (selectedPaymentStatus == AccountingValues.PayrollPaymentStatuses.Paid)
+                q = q.Where(x => x.Status == AccountingValues.PayrollStatuses.Paid);
+            else if (selectedPaymentStatus == AccountingValues.PayrollPaymentStatuses.Ready)
+                q = q.Where(x => x.Status != AccountingValues.PayrollStatuses.Paid
+                    && x.Status != AccountingValues.PayrollStatuses.Cancelled && x.Status != "DELETED"
+                    && x.EmployeePayrollStatus != AccountingValues.EmployeePayrollStatuses.Suspended
+                    && (x.EmployeePayrollStatus != AccountingValues.EmployeePayrollStatuses.Terminated
+                        || x.Employee.TerminationDate.HasValue && x.Employee.TerminationDate.Value >= periodStart)
+                    && (!x.Employee.TerminationDate.HasValue || x.Employee.TerminationDate.Value >= periodStart));
+            else if (selectedPaymentStatus == AccountingValues.PayrollPaymentStatuses.NotPayable)
+                q = q.Where(x => x.Status != AccountingValues.PayrollStatuses.Paid
+                    && (x.Status == AccountingValues.PayrollStatuses.Cancelled || x.Status == "DELETED"
+                        || x.EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Suspended
+                        || x.EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Terminated
+                            && (!x.Employee.TerminationDate.HasValue || x.Employee.TerminationDate.Value < periodStart)
+                        || x.Employee.TerminationDate.HasValue && x.Employee.TerminationDate.Value < periodStart));
+            else
+                q = selectedPaymentStatus == "READY" ? q.Where(x => x.Status == "DRAFT" || x.Status == "PENDING_REVIEW" || x.Status == "PENDING" || x.Status == "APPROVED") : q.Where(x => x.Status == selectedPaymentStatus);
+        }
         if (!string.IsNullOrWhiteSpace(search))
         {
             var t = search.Trim().ToLower();
@@ -136,6 +172,93 @@ public sealed partial class AccountingService(
         EnsureAccess();
         return await db.AccountingEmployeePayrolls.AsNoTracking().Where(x => x.Id == id).Select(MapPayrollExpr()).SingleOrDefaultAsync(token)
             ?? throw new HrNotFoundException("Payroll row was not found.");
+    }
+
+    public async Task<AccountingEmployeePayrollDto> ChangeEmployeePayrollStatusAsync(Guid id, ChangeEmployeePayrollStatusRequest request, CancellationToken token)
+    {
+        EnsureManage();
+        var status = NormalizeEmployeePayrollStatus(request.Status);
+        var row = await db.AccountingEmployeePayrolls.Include(x => x.Period).SingleOrDefaultAsync(x => x.Id == id, token)
+            ?? throw new HrNotFoundException("Payroll row was not found.");
+        await ApplyEmployeePayrollStatusChange(row, status, request.Reason, token);
+        await db.SaveChangesAsync(token);
+        return await GetPayrollAsync(id, token);
+    }
+
+    public async Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkChangeEmployeePayrollStatusAsync(BulkChangeEmployeePayrollStatusRequest request, CancellationToken token)
+    {
+        EnsureManage();
+        var status = NormalizeEmployeePayrollStatus(request.Status);
+        if (request.PayrollIds.Count is 0 or > 500 || request.PayrollIds.Any(id => id == Guid.Empty))
+            throw new HrValidationException("Select between 1 and 500 valid payroll rows.");
+        var ids = request.PayrollIds.Distinct().ToArray();
+        if (ids.Length != request.PayrollIds.Count)
+            throw new HrValidationException("A payroll row can only be selected once.");
+        if (request.Reason?.Length > 1000) throw new HrValidationException("Reason cannot exceed 1000 characters.");
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token) : null;
+        var rows = await db.AccountingEmployeePayrolls.Include(x => x.Period).Where(x => ids.Contains(x.Id)).ToListAsync(token);
+        if (rows.Count != ids.Length) throw new HrNotFoundException("One or more payroll rows were not found.");
+        if (rows.Select(x => x.PeriodId).Distinct().Count() != 1)
+            throw new HrValidationException("Bulk status changes must use payroll rows from one period.");
+        foreach (var row in rows)
+            await ApplyEmployeePayrollStatusChange(row, status, request.Reason, token);
+        await db.SaveChangesAsync(token);
+        if (tx is not null) await tx.CommitAsync(token);
+        return await db.AccountingEmployeePayrolls.AsNoTracking()
+            .Where(x => ids.Contains(x.Id)).OrderBy(x => x.EmployeeNumber)
+            .Select(MapPayrollExpr()).ToArrayAsync(token);
+    }
+
+    public async Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkPayPayrollsAsync(BulkPayAccountingPayrollRequest request, CancellationToken token)
+    {
+        EnsureManage();
+        if (request.PayrollIds.Count is 0 or > 500 || request.PayrollIds.Any(id => id == Guid.Empty))
+            throw new HrValidationException("Select between 1 and 500 valid payroll rows.");
+        var ids = request.PayrollIds.Distinct().ToArray();
+        if (ids.Length != request.PayrollIds.Count)
+            throw new HrValidationException("A payroll row can only be selected once.");
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token)
+            : null;
+        var rows = await db.AccountingEmployeePayrolls
+            .Include(x => x.Employee)
+            .Include(x => x.Period)
+            .Where(x => ids.Contains(x.Id))
+            .ToListAsync(token);
+        if (rows.Count != ids.Length) throw new HrNotFoundException("One or more payroll rows were not found.");
+        if (rows.Select(x => x.PeriodId).Distinct().Count() != 1)
+            throw new HrValidationException("Bulk salary payment must use payroll rows from one period.");
+
+        foreach (var row in rows)
+        {
+            var periodStart = new DateOnly(row.Period.Year, row.Period.Month, 1);
+            if (!row.IsPaymentEligible(periodStart, row.Employee.TerminationDate))
+                throw new HrConflictException($"{row.EmployeeName}: salary is not payable for this payroll period because of employee status or termination eligibility.");
+            if (row.Status is not (AccountingValues.PayrollStatuses.Draft or AccountingValues.PayrollStatuses.PendingReview or AccountingValues.PayrollStatuses.Approved))
+                throw new HrConflictException($"{row.EmployeeName}: salary is not in a payable workflow status.");
+        }
+
+        var paidRows = new List<AccountingEmployeePayrollDto>(rows.Count);
+        foreach (var row in rows)
+            paidRows.Add(await TransitionPayroll(row.Id, "pay", token));
+        if (tx is not null) await tx.CommitAsync(token);
+        return paidRows;
+    }
+
+    private async Task ApplyEmployeePayrollStatusChange(AccountingEmployeePayroll row, string status, string? reason, CancellationToken token)
+    {
+        var before = new { row.EmployeePayrollStatus, row.EmployeePayrollStatusReason };
+        try { row.ChangeEmployeePayrollStatus(status, reason, user.UserId, DateTimeOffset.UtcNow); }
+        catch (InvalidOperationException ex) { throw new HrConflictException(ex.Message); }
+        await WriteAudit(
+            "AccountingEmployeePayrollStatusChanged",
+            nameof(AccountingEmployeePayroll),
+            row.Id.ToString(),
+            row.EmployeeId,
+            before,
+            new { row.EmployeePayrollStatus, row.EmployeePayrollStatusReason, row.Period.Year, row.Period.Month, ChangedBy = user.UserId, row.EmployeePayrollStatusChangedAt },
+            "Employee payroll status changed.",
+            token);
     }
 
     public async Task<AccountingEmployeePayrollDto> UpdatePayrollAsync(Guid id, UpdateAccountingPayrollRequest request, CancellationToken token)
@@ -163,10 +286,17 @@ public sealed partial class AccountingService(
         action = action.Trim().ToLowerInvariant();
         if (action == "approve") EnsureApprove(); else EnsureManage();
         await using var paymentTx = action == "pay" && db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token) : null;
-        var row = await db.AccountingEmployeePayrolls.SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new HrNotFoundException("Payroll row was not found.");
+        var row = await db.AccountingEmployeePayrolls.Include(x => x.Employee).Include(x => x.Period)
+            .SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new HrNotFoundException("Payroll row was not found.");
         if (action == "pay")
         {
             var period = await db.AccountingPayrollPeriods.SingleAsync(x => x.Id == row.PeriodId, token);
+            if (!row.IsPaymentEligible(new DateOnly(period.Year, period.Month, 1), row.Employee.TerminationDate))
+                throw new HrConflictException(row.EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Suspended
+                    ? "Salary payment is blocked because this employee is suspended for the selected payroll period."
+                    : row.Employee.TerminationDate.HasValue && row.Employee.TerminationDate.Value < new DateOnly(period.Year, period.Month, 1)
+                        ? "Salary payment is blocked because the employee's termination date is before the selected payroll period."
+                        : "Salary payment is not payable for this employee in the selected payroll period.");
             if (row.Commissions > 0 && (await db.AccountingCollectorCommissions.AnyAsync(x => x.EmployeeId == row.EmployeeId && x.PeriodYear == period.Year && x.PeriodMonth == period.Month && x.Status == "PAID", token) || await db.AccountingSupervisorCommissions.AnyAsync(x => x.EmployeeId == row.EmployeeId && x.PeriodYear == period.Year && x.PeriodMonth == period.Month && x.Status == "PAID", token))) throw new HrConflictException("Commissions for this employee and month were paid separately. Remove the payroll commission component before payment.");
             if (row.Transportation > 0 && await db.AccountingTransportationClaims.AnyAsync(x => x.EmployeeId == row.EmployeeId && x.ClaimDate.Year == period.Year && x.ClaimDate.Month == period.Month && x.Status == "PAID", token)) throw new HrConflictException("Transportation for this employee and month was paid separately. Remove the payroll transportation component before payment.");
         }
@@ -596,7 +726,11 @@ public sealed partial class AccountingService(
             q = q.Where(x => x.EmployeeNumber.ToLower().Contains(t) || x.FullName.ToLower().Contains(t));
         }
         return await q.OrderBy(x => x.EmployeeNumber)
-            .Select(x => new AccountingLookupEmployeeDto(x.Id, x.EmployeeNumber, x.FullName, x.Department.Name, x.Position != null ? x.Position.NameArabic : null))
+            .Select(x => new AccountingLookupEmployeeDto(x.Id, x.EmployeeNumber,
+                ApiTextLocalizer.IsArabic ? x.FullNameArabic ?? x.FullName : x.FullNameEnglish ?? x.FullName,
+                ApiTextLocalizer.IsArabic ? x.Department.NameArabic ?? x.Department.Name : x.Department.Name,
+                x.Position != null ? (ApiTextLocalizer.IsArabic ? x.Position.NameArabic ?? x.Position.Name : x.Position.Name) : null,
+                x.DepartmentId))
             .ToArrayAsync(token);
     }
 
@@ -618,7 +752,46 @@ public sealed partial class AccountingService(
             .SingleAsync(token);
 
     private static System.Linq.Expressions.Expression<Func<AccountingEmployeePayroll, AccountingEmployeePayrollDto>> MapPayrollExpr() =>
-        x => new AccountingEmployeePayrollDto(x.Id, x.PeriodId, x.EmployeeId, x.EmployeeNumber, x.EmployeeName, x.DepartmentName, x.PositionName, x.BasicSalary, x.Allowances, x.Transportation, x.Commissions, x.Bonuses, x.Deductions, x.OtherAdjustments, x.NetSalary, x.Status, x.Notes, x.CreatedAt);
+        x => new AccountingEmployeePayrollDto(
+            x.Id, x.PeriodId, x.EmployeeId, x.EmployeeNumber, x.EmployeeName, x.DepartmentName, x.PositionName,
+            x.BasicSalary, x.Allowances, x.Transportation, x.Commissions, x.Bonuses, x.Deductions, x.OtherAdjustments,
+            x.NetSalary, x.Status, x.Notes, x.CreatedAt, x.EmployeePayrollStatus, x.EmployeePayrollStatusReason,
+            x.EmployeePayrollStatusChangedByUser == null ? null : x.EmployeePayrollStatusChangedByUser.FullName,
+            x.EmployeePayrollStatusChangedAt,
+            x.Status == AccountingValues.PayrollStatuses.Paid
+                ? AccountingValues.PayrollPaymentStatuses.Paid
+                : x.Status == AccountingValues.PayrollStatuses.Cancelled || x.Status == "DELETED"
+                    || x.EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Suspended
+                    || x.Employee.TerminationDate.HasValue
+                        && (x.Employee.TerminationDate.Value.Year < x.Period.Year
+                            || x.Employee.TerminationDate.Value.Year == x.Period.Year
+                                && x.Employee.TerminationDate.Value.Month < x.Period.Month)
+                    || x.EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Terminated
+                        && (!x.Employee.TerminationDate.HasValue
+                            || x.Employee.TerminationDate.Value.Year < x.Period.Year
+                            || x.Employee.TerminationDate.Value.Year == x.Period.Year
+                                && x.Employee.TerminationDate.Value.Month < x.Period.Month)
+                        ? AccountingValues.PayrollPaymentStatuses.NotPayable
+                        : AccountingValues.PayrollPaymentStatuses.Ready);
+
+    private static string ResolveEmployeePayrollStatus(Employee employee, DateOnly periodEnd)
+    {
+        if (employee.Status == Employee.TerminatedStatus)
+            return employee.TerminationDate.HasValue && employee.TerminationDate.Value <= periodEnd
+                ? AccountingValues.EmployeePayrollStatuses.Terminated
+                : AccountingValues.EmployeePayrollStatuses.Active;
+        if (employee.Status == Employee.SuspendedStatus || employee.Status == Employee.InactiveStatus)
+            return AccountingValues.EmployeePayrollStatuses.Suspended;
+        return AccountingValues.EmployeePayrollStatuses.Active;
+    }
+
+    private static string NormalizeEmployeePayrollStatus(string status)
+    {
+        var normalized = status?.Trim().ToUpperInvariant();
+        if (normalized is null || !AccountingValues.EmployeePayrollStatuses.All.Contains(normalized, StringComparer.Ordinal))
+            throw new HrValidationException("Select a valid employee payroll status.");
+        return normalized;
+    }
 
     private static AccountingTransportationDto MapTransport(AccountingTransportationClaim x) =>
         new(x.Id, x.EmployeeId, x.Employee.EmployeeNumber, x.Employee.FullName, x.Employee.Department?.Name, x.Employee.Position?.NameArabic, x.ClaimDate, x.Amount, x.Purpose, x.Notes, x.FieldVisitId, x.CaseId, x.Status, x.AttachmentFileName, x.CreatedAt);

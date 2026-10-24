@@ -17,16 +17,20 @@ export function useAccountingText() {
       POSTED: text('مسجل', 'Recorded'),
       REVERSED: text('معكوس', 'Reversed'),
       UNRECORDED: text('غير مسجل', 'Not recorded'),
-      READY: text('جاهز للصرف', 'Ready to pay'),
+      READY: text('جاهز للصرف', 'Ready for Payment'),
+      NOT_PAYABLE: text('غير مستحق', 'Not Payable'),
       PENDING_APPROVAL: text('غير مسجل', 'Not recorded'),
-      DRAFT: text('جاهز للصرف', 'Ready to pay'),
-      PENDING_REVIEW: text('جاهز للصرف', 'Ready to pay'),
-      PENDING: text('جاهز للصرف', 'Ready to pay'),
-      APPROVED: text('جاهز للصرف', 'Ready to pay'),
+      DRAFT: text('جاهز للصرف', 'Ready for Payment'),
+      PENDING_REVIEW: text('جاهز للصرف', 'Ready for Payment'),
+      PENDING: text('جاهز للصرف', 'Ready for Payment'),
+      APPROVED: text('جاهز للصرف', 'Ready for Payment'),
       PAID: text('تم الصرف', 'Paid'),
       REJECTED: text('مرفوض', 'Rejected'),
       CANCELLED: text('ملغي', 'Cancelled'),
-      ACTIVE: text('نشطة', 'Active'),
+      ACTIVE: text('نشط', 'Active'),
+      UNPAID_LEAVE: text('إجازة بدون مرتب', 'Unpaid Leave'),
+      SUSPENDED: text('موقوف', 'Suspended'),
+      TERMINATED: text('منتهي الخدمة', 'Terminated'),
       INACTIVE: text('غير نشطة', 'Inactive'),
     }[value] ?? value.replaceAll('_', ' '));
   return { ar, text, money, number, monthName, monthLabel, date, status };
@@ -44,13 +48,15 @@ export function AccountingMonthSelect({ value, onChange }: { value: number; onCh
 export function AccountingStatus({ value }: { value: string }) {
   const a = useAccountingText();
   const tone: StatusTone =
-    value === 'POSTED' || value === 'PAID' || value === 'APPROVED' || value === 'ACTIVE'
+    value === 'POSTED' || value === 'PAID' || value === 'APPROVED' || value === 'ACTIVE' || value === 'READY'
       ? 'success'
       : value === 'PENDING_APPROVAL' || value === 'PENDING_REVIEW' || value === 'PENDING'
         ? 'warning'
-        : value === 'CANCELLED' || value === 'REJECTED' || value === 'INACTIVE'
+        : value === 'CANCELLED' || value === 'REJECTED' || value === 'INACTIVE' || value === 'SUSPENDED' || value === 'TERMINATED' || value === 'NOT_PAYABLE'
           ? 'danger'
-          : 'neutral';
+            : value === 'UNPAID_LEAVE'
+              ? 'warning'
+              : 'neutral';
   return <StatusBadge dot tone={tone}>{a.status(value)}</StatusBadge>;
 }
 

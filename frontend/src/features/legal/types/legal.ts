@@ -88,5 +88,61 @@ export interface RecordLegalActionInput {
   happenedOn?: string | null;
 }
 
+export interface LegalImportSourceRow {
+  rowNumber: number;
+  customerCode?: string | null;
+  customerName?: string | null;
+  nationalId?: string | null;
+  mobileNumber?: string | null;
+  collectionCaseNumber?: string | null;
+  accountNumber?: string | null;
+  organization?: string | null;
+  portfolio?: string | null;
+  legalCaseNumber?: string | null;
+  legalStage?: string | null;
+  courtName?: string | null;
+  nextSessionDate?: string | null;
+  lawyerName?: string | null;
+  notes?: string | null;
+}
+
+export interface LegalImportPreviewRow {
+  source: LegalImportSourceRow;
+  status: 'VALID' | 'INVALID' | 'DUPLICATE' | 'CUSTOMER_NOT_FOUND' | 'CASE_ALREADY_EXISTS';
+  matchedCustomerName?: string | null;
+  matchedCaseNumber?: string | null;
+  errors: string[];
+}
+
+export interface LegalImportPreview {
+  fileName: string;
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  existingCustomersMatched: number;
+  existingCasesMatched: number;
+  duplicateRows: number;
+  newLegalCases: number;
+  rows: LegalImportPreviewRow[];
+}
+
+export interface LegalImportResult {
+  totalRows: number;
+  successfulRows: number;
+  failedRows: number;
+  rows: Array<{ rowNumber: number; status: string; errors: string[] }>;
+}
+
+export interface LegalImportHistoryItem {
+  id: string;
+  fileName: string;
+  totalRows: number;
+  successfulRows: number;
+  failedRows: number;
+  uploadedBy: string;
+  uploadedAt: string;
+  errors: Array<{ rowNumber: number; status: string; errors: string[] }>;
+}
+
 export const LEGAL_STAGES = ['INTAKE', 'NOTICE', 'COURT', 'HEARING', 'JUDGMENT', 'SETTLEMENT', 'RETURNED'] as const;
 export const LEGAL_ACTIONS = ['NOTE', 'NOTICE', 'HEARING', 'JUDGMENT', 'SETTLEMENT', 'RETURN'] as const;

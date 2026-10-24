@@ -189,7 +189,6 @@ export function AppRoutes() {
           <Route path="judicial-expenses" element={<AccountingBookPage />} />
           <Route path="income" element={<AccountingBookPage />} />
           <Route path="advances" element={<AccountingAdvancesPage />} />
-          <Route path="carried-advances" element={<AccountingAdvancesPage />} />
           <Route path="recurring" element={<AccountingRecurringPage />} />
           <Route path="commission-calculation" element={<AccountingCommissionCalculationPage />} />
           <Route path="exports" element={<AccountingExportsPage />} />

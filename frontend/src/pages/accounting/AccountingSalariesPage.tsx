@@ -29,8 +29,13 @@ export function AccountingSalariesPage() {
   const [periodId, setPeriodId] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [employeeStatus, setEmployeeStatus] = useState('');
   const [rows, setRows] = useState<AccountingEmployeePayroll[]>([]);
   const [selected, setSelected] = useState<AccountingEmployeePayroll>();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [statusChangeIds, setStatusChangeIds] = useState<string[]>([]);
+  const [statusChangeValue, setStatusChangeValue] = useState('ACTIVE');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -43,9 +48,10 @@ export function AccountingSalariesPage() {
 
   const loadRows = useCallback(async (id: string) => {
     if (!id) { setRows([]); return; }
-    const page = await accountingService.salaries(id, search, status);
+    const page = await accountingService.salaries(id, search, status, employeeStatus);
     setRows(page.items);
-  }, [search, status]);
+    setSelectedIds((current) => current.filter((rowId) => page.items.some((row) => row.id === rowId)));
+  }, [search, status, employeeStatus]);
 
   useEffect(() => { refreshPeriods().catch((reason) => setError(getApiErrorMessage(reason, a.text('تعذر تحميل الفترات', 'Failed to load periods')))); }, [refreshPeriods]);
   useEffect(() => { loadRows(periodId).catch((reason) => setError(getApiErrorMessage(reason, a.text('تعذر تحميل المرتبات', 'Failed to load salaries')))); }, [periodId, loadRows]);
@@ -80,6 +86,10 @@ export function AccountingSalariesPage() {
   };
 
   const act = async (id: string, action: 'submit' | 'approve' | 'pay' | 'cancel') => {
+    if (action === 'pay' && !rows.some((row) => row.id === id && row.paymentStatus === 'READY')) {
+      setError(a.text('لا يمكن صرف هذا المرتب لأن الموظف غير مستحق للصرف في هذه الفترة.', 'This salary cannot be paid because the employee is not payable for this period.'));
+      return;
+    }
     setBusy(true); setError('');
     try {
       const updated = action === 'pay' && selected?.id === id && editable.includes(selected.status)
@@ -92,12 +102,39 @@ export function AccountingSalariesPage() {
   };
 
   const bulkPay = async () => {
-    const targets = rows.filter(row => [...editable, 'APPROVED'].includes(row.status));
+    const targets = rows.filter(row => row.paymentStatus === 'READY' && [...editable, 'APPROVED'].includes(row.status));
+    if (!targets.length) return;
     setBusy(true); setError('');
     try {
-      for (const row of targets) await accountingService.salaryAction(row.id, 'pay');
+      await accountingService.bulkPaySalaries(targets.map((row) => row.id));
     } catch (reason) { setError(getApiErrorMessage(reason, a.text('تعذر صرف بعض المرتبات؛ راجع الحالات قبل إعادة المحاولة', 'Some salaries could not be paid. Review their statuses before retrying.'))); }
     finally { await loadRows(periodId).catch(() => undefined); setBusy(false); }
+  };
+
+  const beginStatusChange = (ids: string[], nextStatus: string) => {
+    if (!ids.length) return;
+    setStatusChangeIds(ids);
+    setStatusChangeValue(nextStatus);
+    setStatusChangeReason('');
+  };
+
+  const applyEmployeeStatus = async () => {
+    if (!statusChangeIds.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = statusChangeIds.length === 1
+        ? [await accountingService.changeEmployeePayrollStatus(statusChangeIds[0], statusChangeValue, statusChangeReason)]
+        : await accountingService.bulkChangeEmployeePayrollStatus(statusChangeIds, statusChangeValue, statusChangeReason);
+      setSelected((current) => current ? updated.find((row) => row.id === current.id) ?? current : current);
+      setSelectedIds((current) => current.filter((id) => !statusChangeIds.includes(id)));
+      setStatusChangeIds([]);
+      await loadRows(periodId);
+    } catch (reason) {
+      setError(getApiErrorMessage(reason, a.text('تعذر تحديث حالة الموظف.', 'Could not update employee status.')));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const salaryDetails = selected ? `${selected.employeeName} / ${a.monthLabel(year, month)}
@@ -110,8 +147,12 @@ ${a.text('تسويات أخرى', 'Other adjustments')}: ${a.money(selected.othe
 ${selected.notes ?? ''}` : '';
   const currentPeriod = periods.find((period) => period.id === periodId);
   const totalNet = rows.reduce((sum, row) => sum + row.netSalary, 0);
-  const readyRows = rows.filter(row => [...editable, 'APPROVED'].includes(row.status));
+  const readyRows = rows.filter(row => row.paymentStatus === 'READY' && [...editable, 'APPROVED'].includes(row.status));
   const paidRows = rows.filter(row => row.status === 'PAID');
+  const notPayableRows = rows.filter(row => row.paymentStatus === 'NOT_PAYABLE');
+  const selectableRows = rows.filter((row) => row.status !== 'PAID' && row.status !== 'CANCELLED');
+  const statusOptions = ['ACTIVE', 'UNPAID_LEAVE', 'SUSPENDED', 'TERMINATED'];
+  const employeeStatusLabel = (value: string) => a.status(value);
 
   return (
     <div className="space-y-5">{moneyDialog}
@@ -131,19 +172,24 @@ ${selected.notes ?? ''}` : '';
       {error ? <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       {periodId ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <AccountingKpi label={a.text('عدد الموظفين', 'Employees')} value={a.number(currentPeriod?.employeeCount ?? rows.length)} />
           <AccountingKpi label={a.text('صافي المسير', 'Net payroll')} value={a.money(currentPeriod?.totalNet ?? totalNet)} />
           <AccountingKpi label={a.text('تم صرفه', 'Paid')} value={a.number(paidRows.length)} />
           <AccountingKpi label={a.text('جاهز للصرف', 'Ready to pay')} value={a.number(readyRows.length)} />
+          <AccountingKpi label={a.text('غير مستحق', 'Not Payable')} value={a.number(notPayableRows.length)} />
         </div>
       ) : null}
 
       <div className="flex flex-wrap gap-2">
         <input className="min-w-[220px] flex-1 rounded-xl border border-mis-control px-3 py-2 text-sm" placeholder={a.text('بحث بالموظف', 'Search employee')} value={search} onChange={(event) => setSearch(event.target.value)} />
-        <ProfessionalSelect className="min-h-11 min-w-[12rem] rounded-xl border border-mis-control bg-white px-3 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">{a.text('كل الحالات', 'All statuses')}</option>
-          {['READY', 'PAID', 'CANCELLED'].map((value) => <option key={value} value={value}>{a.status(value)}</option>)}
+        <ProfessionalSelect aria-label={a.text('حالة الموظف', 'Employee Status')} className="min-h-11 min-w-[12rem] rounded-xl border border-mis-control bg-white px-3 text-sm" value={employeeStatus} onChange={(event) => setEmployeeStatus(event.target.value)}>
+          <option value="">{a.text('كل حالات الموظف', 'All Employee Statuses')}</option>
+          {statusOptions.map((value) => <option key={value} value={value}>{employeeStatusLabel(value)}</option>)}
+        </ProfessionalSelect>
+        <ProfessionalSelect aria-label={a.text('حالة الصرف', 'Payment Status')} className="min-h-11 min-w-[12rem] rounded-xl border border-mis-control bg-white px-3 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="">{a.text('كل حالات الصرف', 'All Payment Statuses')}</option>
+          {['READY', 'PAID', 'NOT_PAYABLE'].map((value) => <option key={value} value={value}>{a.status(value)}</option>)}
         </ProfessionalSelect>
         <ProfessionalSelect className="min-h-11 min-w-[14rem] rounded-xl border border-mis-control bg-white px-3 text-sm" value={periodId} onChange={(event) => setPeriodId(event.target.value)}>
           <option value="">{a.text('اختر الفترة', 'Select period')}</option>
@@ -151,6 +197,19 @@ ${selected.notes ?? ''}` : '';
         </ProfessionalSelect>
         {readyRows.length ? <Button disabled={busy} fullWidth={false} onClick={() => confirmMoney(readyRows.reduce((n, x) => n + x.netSalary, 0), readyRows.map(x => x.employeeName + ': ' + a.money(x.netSalary)).join('\n'), bulkPay)} size="sm" variant="outline">{a.text('صرف المرتبات المعروضة', 'Pay listed salaries')}</Button> : null}
       </div>
+
+      {selectedIds.length ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-mis-sky bg-mis-pale px-4 py-3">
+          <span className="text-sm font-bold text-mis-navy">{a.text('الموظفون المحددون', 'Selected employees')}: {a.number(selectedIds.length)}</span>
+          <ProfessionalSelect aria-label={a.text('حالة الموظف', 'Employee Status')} className="min-h-10 min-w-[12rem] rounded-xl border border-mis-control bg-white px-3 text-sm" value={statusChangeValue} onChange={(event) => setStatusChangeValue(event.target.value)}>
+            {statusOptions.map((value) => <option key={value} value={value}>{employeeStatusLabel(value)}</option>)}
+          </ProfessionalSelect>
+          <Button disabled={busy} fullWidth={false} onClick={() => beginStatusChange(selectedIds, statusChangeValue)} size="sm">
+            {a.text('تطبيق على المحددين', 'Apply to Selected')}
+          </Button>
+          <Button fullWidth={false} onClick={() => setSelectedIds([])} size="sm" variant="ghost">{a.text('إلغاء التحديد', 'Clear Selection')}</Button>
+        </div>
+      ) : null}
 
       {!periodId ? (
         <EmptyState
@@ -162,27 +221,42 @@ ${selected.notes ?? ''}` : '';
       ) : (
         <div className="overflow-hidden rounded-2xl border border-mis-border bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[48rem] text-sm">
+            <table className="w-full min-w-[72rem] text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-3 py-3 text-start">{a.text('الرقم', 'No.')}</th>
+                  <th className="px-3 py-3 text-start">
+                    <input aria-label={a.text('تحديد كل الموظفين المعروضين', 'Select all listed employees')} checked={selectableRows.length > 0 && selectableRows.every((row) => selectedIds.includes(row.id))} disabled={!selectableRows.length} onChange={(event) => setSelectedIds(event.target.checked ? selectableRows.map((row) => row.id) : [])} type="checkbox" />
+                  </th>
+                  <th className="px-3 py-3 text-start">{a.text('رقم الموظف', 'Employee Number')}</th>
                   <th className="px-3 py-3 text-start">{a.text('الموظف', 'Employee')}</th>
-                  <th className="px-3 py-3 text-start">{a.text('القسم', 'Dept')}</th>
-                  <th className="px-3 py-3 text-end">{a.text('الأساسي', 'Basic')}</th>
-                  <th className="px-3 py-3 text-end">{a.text('صافي', 'Net')}</th>
-                  <th className="px-3 py-3 text-start">{a.text('الحالة', 'Status')}</th>
-                  <th className="px-3 py-3" />
+                  <th className="px-3 py-3 text-start">{a.text('الإدارة', 'Department')}</th>
+                  <th className="px-3 py-3 text-end">{a.text('الراتب الأساسي', 'Basic Salary')}</th>
+                  <th className="px-3 py-3 text-end">{a.text('صافي الراتب', 'Net Salary')}</th>
+                  <th className="px-3 py-3 text-start">{a.text('حالة الموظف', 'Employee Status')}</th>
+                  <th className="px-3 py-3 text-start">{a.text('حالة الصرف', 'Payment Status')}</th>
+                  <th className="px-3 py-3 text-start">{a.text('الإجراءات', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-mis-border">
                 {rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50">
+                    <td className="px-3 py-2">
+                      <input aria-label={`${a.text('تحديد', 'Select')} ${row.employeeName}`} checked={selectedIds.includes(row.id)} disabled={row.status === 'PAID' || row.status === 'CANCELLED'} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, row.id] : current.filter((id) => id !== row.id))} type="checkbox" />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{row.employeeNumber}</td>
                     <td className="px-3 py-2 font-semibold text-mis-navy">{row.employeeName}</td>
                     <td className="px-3 py-2 text-slate-600">{row.departmentName ?? '—'}</td>
                     <td className="px-3 py-2 text-end" data-bidi="ltr">{a.money(row.basicSalary)}</td>
                     <td className="px-3 py-2 text-end font-bold" data-bidi="ltr">{a.money(row.netSalary)}</td>
-                    <td className="px-3 py-2"><AccountingStatus value={row.status} /></td>
+                    <td className="px-3 py-2">
+                      <div className="flex min-w-[14rem] items-center gap-2">
+                        <AccountingStatus value={row.employeePayrollStatus} />
+                        <ProfessionalSelect aria-label={`${a.text('حالة الموظف', 'Employee Status')} ${row.employeeName}`} className="min-h-9 min-w-[10rem] rounded-lg border border-mis-control bg-white px-2 text-xs" disabled={row.status === 'PAID' || row.status === 'CANCELLED'} value={row.employeePayrollStatus} onChange={(event) => beginStatusChange([row.id], event.target.value)}>
+                          {statusOptions.map((value) => <option key={value} value={value}>{employeeStatusLabel(value)}</option>)}
+                        </ProfessionalSelect>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2"><AccountingStatus value={row.paymentStatus} /></td>
                     <td className="px-3 py-2 text-end">
                       <Button fullWidth={false} leftIcon={<WalletCards className="h-4 w-4" />} onClick={() => setSelected(row)} size="sm" variant="ghost">{a.text('تفاصيل', 'Details')}</Button>
                     </td>
@@ -203,7 +277,21 @@ ${selected.notes ?? ''}` : '';
                 <h2 className="text-xl font-bold text-mis-navy">{selected.employeeName}</h2>
                 <p className="text-sm text-slate-500">{selected.employeeNumber} · {selected.positionName ?? '—'}</p>
               </div>
-              <AccountingStatus value={selected.status} />
+              <div className="flex flex-col items-end gap-1">
+                <AccountingStatus value={selected.employeePayrollStatus} />
+                <AccountingStatus value={selected.paymentStatus} />
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-mis-border bg-slate-50 p-4">
+              <h3 className="text-sm font-bold text-mis-navy">{a.text('حالة الموظف للفترة', 'Employee Status for Period')}</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <p className="text-sm"><span className="text-slate-500">{a.text('حالة الموظف', 'Employee Status')}: </span><span className="font-semibold">{employeeStatusLabel(selected.employeePayrollStatus)}</span></p>
+                <p className="text-sm"><span className="text-slate-500">{a.text('حالة الصرف', 'Payment Status')}: </span><span className="font-semibold">{a.status(selected.paymentStatus)}</span></p>
+                <p className="text-sm"><span className="text-slate-500">{a.text('فترة المرتبات', 'Payroll Period')}: </span>{a.monthLabel(year, month)}</p>
+                <p className="text-sm"><span className="text-slate-500">{a.text('سبب / ملاحظات', 'Reason / Notes')}: </span>{selected.employeePayrollStatusReason ?? '—'}</p>
+                <p className="text-sm"><span className="text-slate-500">{a.text('تم التغيير بواسطة', 'Changed By')}: </span>{selected.employeePayrollStatusChangedBy ?? '—'}</p>
+                <p className="text-sm"><span className="text-slate-500">{a.text('تاريخ التغيير', 'Changed At')}: </span>{selected.employeePayrollStatusChangedAt ? new Intl.DateTimeFormat(a.ar ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(selected.employeePayrollStatusChangedAt)) : '—'}</p>
+              </div>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {([
@@ -235,9 +323,34 @@ ${selected.notes ?? ''}` : '';
             <p className="mt-4 text-lg font-bold text-mis-navy" data-bidi="ltr">{a.text('الصافي', 'Net')}: {a.money(selected.netSalary)}</p>
             <div className="mt-5 flex flex-wrap gap-2">
               {editable.includes(selected.status) ? <Button disabled={busy} fullWidth={false} leftIcon={<Save className="h-4 w-4" />} onClick={() => confirmMoney(selected.netSalary, salaryDetails, saveSelected)}>{a.text('حفظ', 'Save')}</Button> : null}
-              {[...editable, 'APPROVED'].includes(selected.status) ? <Button disabled={busy || !Number.isFinite(selected.netSalary) || selected.netSalary < 0} fullWidth={false} onClick={() => confirmMoney(selected.netSalary, salaryDetails, () => act(selected.id, 'pay'))} variant="outline">{a.text('تأكيد وصرف المرتب', 'Confirm and pay salary')}</Button> : null}
+              {[...editable, 'APPROVED'].includes(selected.status) ? <Button disabled={busy || selected.paymentStatus !== 'READY' || !Number.isFinite(selected.netSalary) || selected.netSalary < 0} fullWidth={false} onClick={() => confirmMoney(selected.netSalary, salaryDetails, () => act(selected.id, 'pay'))} variant="outline">{a.text('تأكيد وصرف المرتب', 'Confirm and pay salary')}</Button> : null}
               <AccountingDeleteButton kind="PAYROLL" id={selected.id} amount={selected.netSalary} description={`${selected.employeeName} / ${a.monthLabel(year, month)}`} onDeleted={async () => { setSelected(undefined); await loadRows(periodId); await refreshPeriods(); }} />
               <Button fullWidth={false} leftIcon={<X className="h-4 w-4" />} onClick={() => setSelected(undefined)} variant="ghost">{a.text('إغلاق', 'Close')}</Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {statusChangeIds.length ? (
+        <Modal
+          open
+          onClose={() => setStatusChangeIds([])}
+          title={a.text('تأكيد تغيير حالة الموظف', 'Confirm Employee Status Change')}
+          description={a.text('سيتم تطبيق حالة الموظف على فترة المرتبات المحددة فقط، ولن يتغير سجل الموظف في الموارد البشرية.', 'This status applies only to the selected payroll period and does not change the employee’s HR record.')}
+        >
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-mis-navy">
+              {a.text('عدد الموظفين المحددين', 'Selected employees')}: {a.number(statusChangeIds.length)}
+              {' · '}
+              {employeeStatusLabel(statusChangeValue)}
+            </p>
+            <label className="block text-sm">
+              <span className="mb-1 block text-slate-600">{a.text('سبب / ملاحظات (اختياري)', 'Reason / Notes (Optional)')}</span>
+              <textarea className="w-full rounded-xl border border-mis-control px-3 py-2" maxLength={1000} onChange={(event) => setStatusChangeReason(event.target.value)} value={statusChangeReason} />
+            </label>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button disabled={busy} fullWidth={false} onClick={() => setStatusChangeIds([])} variant="ghost">{a.text('إلغاء', 'Cancel')}</Button>
+              <Button disabled={busy} fullWidth={false} onClick={() => void applyEmployeeStatus()}>{a.text('تأكيد التطبيق', 'Confirm Apply')}</Button>
             </div>
           </div>
         </Modal>

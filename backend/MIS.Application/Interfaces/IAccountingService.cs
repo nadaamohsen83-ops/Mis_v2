@@ -9,8 +9,11 @@ public interface IAccountingService
     Task<IReadOnlyList<AccountingPayrollPeriodDto>> ListPeriodsAsync(CancellationToken token);
     Task<AccountingPayrollPeriodDto> EnsurePeriodAsync(GeneratePayrollRequest request, CancellationToken token);
     Task<AccountingPayrollPeriodDto> GeneratePayrollAsync(GeneratePayrollRequest request, CancellationToken token);
-    Task<AccountingPayrollPageDto> ListPayrollsAsync(Guid periodId, string? search, string? status, int page, int pageSize, CancellationToken token);
+    Task<AccountingPayrollPageDto> ListPayrollsAsync(Guid periodId, string? search, string? status, string? employeeStatus, int page, int pageSize, CancellationToken token);
     Task<AccountingEmployeePayrollDto> GetPayrollAsync(Guid id, CancellationToken token);
+    Task<AccountingEmployeePayrollDto> ChangeEmployeePayrollStatusAsync(Guid id, ChangeEmployeePayrollStatusRequest request, CancellationToken token);
+    Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkChangeEmployeePayrollStatusAsync(BulkChangeEmployeePayrollStatusRequest request, CancellationToken token);
+    Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkPayPayrollsAsync(BulkPayAccountingPayrollRequest request, CancellationToken token);
     Task<AccountingEmployeePayrollDto> UpdatePayrollAsync(Guid id, UpdateAccountingPayrollRequest request, CancellationToken token);
     Task<AccountingEmployeePayrollDto> SubmitPayrollAsync(Guid id, CancellationToken token);
     Task<AccountingEmployeePayrollDto> ApprovePayrollAsync(Guid id, CancellationToken token);

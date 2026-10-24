@@ -14,7 +14,10 @@ public sealed record BankCustomerListItemDto(
     decimal RemainingAmount,
     string? Status,
     string? AssignedCollectorName,
-    int CaseCount);
+    int CaseCount,
+    string CustomerCode = "",
+    string? PortfolioName = null,
+    string? ProductType = null);
 
 public sealed record BankCustomerPageDto(
     IReadOnlyCollection<BankCustomerListItemDto> Items,
@@ -77,4 +80,20 @@ public sealed record BankCustomerDetailsDto(
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Visits,
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Complaints,
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Activities,
-    IReadOnlyCollection<BankCustomerLinkSummaryDto> Timeline);
+    IReadOnlyCollection<BankCustomerLinkSummaryDto> Timeline,
+    string? PortfolioName = null,
+    string? ProductType = null,
+    string? ImportFileName = null,
+    string? ImportBatchNumber = null,
+    string? ImportBatchStatus = null,
+    DateTimeOffset? ImportedAt = null,
+    string? ImportedCustomerName = null,
+    string? ImportedNationalId = null,
+    string? ImportedMobileNumber = null,
+    string? ImportedAddress = null,
+    string? ImportAccountNumber = null,
+    string? ImportContractNumber = null,
+    string? ImportFeedback = null,
+    string? ImportNotes = null,
+    IReadOnlyList<string>? ImportedPhones = null,
+    IReadOnlyDictionary<string, string>? ImportedFields = null);

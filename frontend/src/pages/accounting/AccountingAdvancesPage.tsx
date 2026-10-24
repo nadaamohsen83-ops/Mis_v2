@@ -1,28 +1,335 @@
-import { ActionMenu } from '../../components/common/ActionMenu';
-import { AccountingDeleteButton } from '../../features/accounting/AccountingDeleteButton';
-import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Eye, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../../components/common/Button';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { Modal } from '../../components/common/Modal';
 import { DateControl } from '../../components/forms/DateControl';
 import { ProfessionalSelect } from '../../components/forms/ProfessionalSelect';
+import { useAuth } from '../../context/AuthContext';
+import { useLocalization } from '../../context/LocalizationContext';
 import { AccountingKpi, useAccountingText } from '../../features/accounting/accountingUi';
-import { BookEntryForm } from '../../features/accounting/BookEntryForm';
-import { AccountingExportButton, AddButton, BookEmpty, BookError, BookField, BookHeader, cairoToday, cell, panel, table, useDebounced } from '../../features/accounting/bookUi';
+import { AccountingExportButton, AddButton, BookEmpty, BookError, BookField, BookHeader, cairoToday, cell, ClearButton, panel, table, useDebounced } from '../../features/accounting/bookUi';
 import { accountingBookService } from '../../features/accounting/services/accountingBookService';
-import type { Advance } from '../../features/accounting/types/book';
+import { accountingService } from '../../features/accounting/services/accountingService';
+import type { AccountingLookupEmployee } from '../../features/accounting/types/accounting';
+import type { Advance, AdvanceDetails, AdvanceFilter, BookCreate } from '../../features/accounting/types/book';
+import type { TranslationKey } from '../../localization/translations';
+import { financeService } from '../../features/finance/services/financeService';
+import type { FinanceAccount } from '../../features/finance/types/finance';
 import { getApiErrorMessage } from '../../services/apiClient';
 
+type AdvanceForm = BookCreate;
+type ReverseTarget = { id: string; isPayment: boolean; label: string };
+
+const formDefaults = (category: string): AdvanceForm => ({
+  category,
+  transactionDate: cairoToday(),
+  amount: 0,
+  accountId: '',
+  counterAccountId: '',
+  description: '',
+  requestId: crypto.randomUUID(),
+});
+
 export function AccountingAdvancesPage() {
-  const a = useAccountingText(); const carried = useLocation().pathname.endsWith('carried-advances'); const [asOf, setAsOf] = useState(cairoToday); const [search, setSearch] = useState(''); const query = useDebounced(search); const [status, setStatus] = useState('OPEN');
-  const [rows, setRows] = useState<Advance[]>(); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0); const [create, setCreate] = useState(false); const [repay, setRepay] = useState<Advance>();
-  useEffect(() => { let active = true; setRows(undefined); setError(''); accountingBookService.advances(asOf, query).then(d => { if (active) setRows(d); }).catch(e => { if (active) setError(getApiErrorMessage(e, a.text('تعذر تحميل السلف', 'Could not load advances'))); }); return () => { active = false; }; }, [asOf, query, refresh]);
-  const filtered = rows?.filter(x => (!carried || x.carried) && (!status || (status === 'OPEN' ? x.remaining > 0 : x.remaining === 0))) ?? [];
-  const sum = (key: 'amount' | 'repaid' | 'remaining') => filtered.reduce((n, x) => n + x[key], 0);
-  return <div className="space-y-6"><BookHeader title={carried ? a.text('السلف المرحلة', 'Carried advances') : a.text('السلف والتسويات', 'Employee advances')} description={a.text('كشف أرصدة لكل موظف، يوضح أصل السلفة وما تم سداده والمتبقي حتى التاريخ المحدد.', 'Employee balances showing each original advance, repayments and outstanding amount as of the selected date.')}><AccountingExportButton report="advances" filter={{ to: asOf, asOf, search: query || undefined, category: carried ? 'CARRIED_ADVANCE' : undefined, status: status || undefined }} /><AddButton onClick={() => { setRepay(undefined); setCreate(true); }}>{carried ? a.text('رصيد سلفة سابق', 'Opening advance balance') : a.text('صرف سلفة', 'New advance')}</AddButton></BookHeader><BookError error={error} /><div className="grid gap-4 sm:grid-cols-3"><AccountingKpi label={a.text('أصل السلف', 'Original advances')} value={a.money(sum('amount'))} /><AccountingKpi label={a.text('المسدد', 'Repaid')} value={a.money(sum('repaid'))} /><AccountingKpi label={a.text('المتبقي', 'Outstanding')} value={a.money(sum('remaining'))} /></div>
-    <div className={`${panel} flex flex-wrap items-end gap-4`}><BookField label={a.text('الرصيد حتى تاريخ', 'Balance as of')}><DateControl className="w-44" value={asOf} onChange={e => setAsOf(e.target.value)} /></BookField><BookField label={a.text('الموظف / المستند', 'Employee / document')}><input className="field" value={search} onChange={e => setSearch(e.target.value)} /></BookField><BookField label={a.text('حالة التسوية', 'Settlement')}><ProfessionalSelect className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="">{a.text('الكل', 'All')}</option><option value="OPEN">{a.text('رصيد مفتوح', 'Outstanding')}</option><option value="SETTLED">{a.text('مسددة بالكامل', 'Fully repaid')}</option></ProfessionalSelect></BookField><Link className="pb-3 text-sm font-bold text-mis-primary" to="/finance/expenses">{a.text('سجل الحركات', 'Review drafts and entries')} →</Link></div>
-    <div className="overflow-hidden rounded-2xl border border-mis-border bg-white"><div className="overflow-x-auto"><table className={table}><thead><tr>{['الموظف / المستند', 'التاريخ', 'أصل السلفة', 'المسدد', 'المتبقي', 'النوع', ''].map((x, i) => <th key={i} className={cell}>{a.text(x, ['Employee / document', 'Date', 'Original', 'Repaid', 'Outstanding', 'Type', ''][i])}</th>)}</tr></thead><tbody>{filtered.map(x => <tr key={x.id}><td className={cell}><p className="font-bold text-mis-navy">{x.employeeName}</p><Link to={`/finance/journals/${x.journalEntryId}`} className="font-mono text-xs text-mis-primary">{x.documentNumber}</Link></td><td className={cell}>{a.date(x.date)}</td><td className={cell} data-bidi="ltr">{a.money(x.amount)}</td><td className={cell} data-bidi="ltr">{a.money(x.repaid)}</td><td className={`${cell} font-bold text-mis-primary`} data-bidi="ltr">{a.money(x.remaining)}</td><td className={cell}>{x.carried ? a.text('مرحلة', 'Carried') : a.text('الشهر الحالي', 'Current month')}</td><td className={cell}><ActionMenu><Button fullWidth={false} variant="outline" size="sm" disabled={x.remaining <= 0} onClick={() => { setRepay(x); setCreate(true); }}>{a.text('تسجيل سداد', 'Record repayment')}</Button><AccountingDeleteButton menuItem entryId={x.id} amount={x.amount} description={`${x.employeeName} / ${x.documentNumber}`} onDeleted={() => setRefresh(n => n + 1)} /></ActionMenu></td></tr>)}</tbody></table></div>{!rows && !error ? <div className="grid place-items-center p-10"><LoadingSpinner /></div> : rows && !filtered.length ? <BookEmpty /> : null}</div>
-    <p className="text-xs leading-6 text-slate-500">{a.text('السلف المرحلة تشمل المتبقي من الشهور السابقة والأرصدة الافتتاحية. السلفة لا تدخل في إجمالي المصروفات، وتسويتها تقلل رصيد الموظف.', 'Carried balances include earlier months and opening advances. Issuing or repaying an advance changes the employee balance and cash flow; it is not an expense or income.')}</p>
-    <BookEntryForm open={create} advance={repay} category={carried ? 'CARRIED_ADVANCE' : 'ADVANCE'} onClose={() => setCreate(false)} onSaved={() => setRefresh(n => n + 1)} />
+  const a = useAccountingText();
+  const { isRtl, language, t } = useLocalization();
+  const tx = (key: TranslationKey) => t(key);
+  const { user } = useAuth();
+  const canCreateAdvance = Boolean(user && (user.roles.includes('Admin') || user.permissions.includes('*') || user.permissions.includes('finance.journal.manual.create') || user.permissions.includes('accounting.transaction.manage')));
+  const canReverseAdvance = Boolean(user && (user.roles.includes('Admin') || user.permissions.includes('*') || user.permissions.includes('finance.transaction.reverse')));
+  const [rows, setRows] = useState<Advance[]>([]);
+  const [summary, setSummary] = useState({ totalAmount: 0, totalPaid: 0, totalRemaining: 0, openCount: 0 });
+  const [employees, setEmployees] = useState<AccountingLookupEmployee[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [error, setError] = useState('');
+  const [employeeError, setEmployeeError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [employeeName, setEmployeeName] = useState('');
+  const [employeeNumber, setEmployeeNumber] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [status, setStatus] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const nameQuery = useDebounced(employeeName);
+  const numberQuery = useDebounced(employeeNumber);
+  const [formMode, setFormMode] = useState<'advance' | 'payment'>();
+  const [selectedAdvance, setSelectedAdvance] = useState<Advance>();
+  const [form, setForm] = useState<AdvanceForm>(formDefaults('ADVANCE'));
+  const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
+  const [formLoading, setFormLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [details, setDetails] = useState<AdvanceDetails>();
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [reverseTarget, setReverseTarget] = useState<ReverseTarget>();
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversing, setReversing] = useState(false);
+
+  const filter = useMemo<AdvanceFilter>(() => ({
+    from: from || undefined,
+    to: to || undefined,
+    employeeName: nameQuery || undefined,
+    employeeNumber: numberQuery || undefined,
+    departmentId: departmentId || undefined,
+    status: status || undefined,
+  }), [departmentId, from, nameQuery, numberQuery, status, to]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    setRows([]);
+    setSummary({ totalAmount: 0, totalPaid: 0, totalRemaining: 0, openCount: 0 });
+    void accountingBookService.advances(filter).then(result => {
+      if (!active) return;
+      setRows(result.items);
+      setSummary({ totalAmount: result.totalAmount, totalPaid: result.totalPaid, totalRemaining: result.totalRemaining, openCount: result.openCount });
+    }).catch(e => {
+      if (active) setError(getApiErrorMessage(e, tx('advancesLoadError')));
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [filter, refresh, language]);
+
+  useEffect(() => {
+    let active = true;
+    setEmployeeError('');
+    void accountingService.employees().then(employeeOptions => {
+      if (!active) return;
+      setEmployees(employeeOptions);
+      setDepartments([...new Map(employeeOptions.filter(x => x.departmentId && x.departmentName).map(x => [x.departmentId!, { id: x.departmentId!, name: x.departmentName! }])).values()].sort((x, y) => x.name.localeCompare(y.name)));
+    }).catch(e => {
+      if (active) setEmployeeError(getApiErrorMessage(e, tx('advancesEmployeesLoadError')));
+    });
+    return () => { active = false; };
+  }, [language]);
+
+  const loadDetails = async (id: string) => {
+    setDetails(undefined);
+    setDetailsLoading(true);
+    setError('');
+    try {
+      setDetails(await accountingBookService.advanceDetails(id));
+    } catch (e) {
+      setError(getApiErrorMessage(e, tx('advancesDetailsLoadError')));
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const openAdvanceForm = async (mode: 'advance' | 'payment', advance?: Advance) => {
+    setFormMode(mode);
+    setSelectedAdvance(advance);
+    setFormError('');
+    setFormLoading(true);
+    setForm(formDefaults(mode === 'advance' ? 'ADVANCE' : 'ADVANCE_REPAYMENT'));
+    try {
+      const accountOptions = await financeService.accounts();
+      setAccounts(accountOptions);
+      const usable = accountOptions.filter(x => x.isActive && x.postingAllowed && !x.controlAccountType);
+      const category = mode === 'advance' ? 'ADVANCE' : 'ADVANCE_REPAYMENT';
+      setForm({
+        ...formDefaults(category),
+        accountId: advance?.accountId ?? usable.find(x => x.code === '113100' && !x.isCashAccount)?.id ?? '',
+        counterAccountId: usable.find(x => x.isCashAccount)?.id ?? '',
+        employeeId: advance?.employeeId,
+        relatedAdvanceId: advance?.id,
+        description: mode === 'payment' && advance ? t('advancesRepaymentReason', { documentNumber: advance.documentNumber }) : '',
+      });
+    } catch (e) {
+      setFormError(getApiErrorMessage(e, tx('advancesAccountsLoadError')));
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const closeForm = () => { setFormMode(undefined); setFormError(''); };
+  const usableAccounts = accounts.filter(x => x.isActive && x.postingAllowed && !x.controlAccountType);
+  const employee = employees.find(x => x.id === form.employeeId);
+  const accountName = (account: FinanceAccount) => `${account.code} · ${a.ar ? account.nameArabic : account.nameEnglish}`;
+
+  const saveForm = async (event: FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+    setFormError('');
+    if (!form.employeeId) { setFormError(tx('advancesEmployeeRequired')); return; }
+    if (!form.amount || form.amount <= 0) { setFormError(tx('advancesPositiveAmount')); return; }
+    if (!form.transactionDate) { setFormError(tx('advancesDateRequired')); return; }
+    if (formMode === 'advance' && !form.description.trim()) { setFormError(tx('advancesAdvanceReasonRequired')); return; }
+    if (!form.paymentMethod) { setFormError(tx('advancesPaymentMethodRequired')); return; }
+    if (!form.accountId || !form.counterAccountId) { setFormError(tx('advancesAccountsRequired')); return; }
+    if (formMode === 'payment' && selectedAdvance && form.amount > selectedAdvance.remaining) {
+      setFormError(tx('advancesOverpayment'));
+      return;
+    }
+    setSaving(true);
+    try {
+      await accountingBookService.create(form);
+      closeForm();
+      setRefresh(x => x + 1);
+      if (selectedAdvance) await loadDetails(selectedAdvance.id);
+    } catch (e) {
+      setFormError(getApiErrorMessage(e, tx('advancesSaveError')));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reverse = async () => {
+    if (!reverseTarget || reversing) return;
+    if (reverseReason.trim().length < 3) {
+      setError(tx('advancesReversalReasonRequired'));
+      return;
+    }
+    setReversing(true);
+    setError('');
+    const target = reverseTarget;
+    try {
+      await accountingBookService.action(reverseTarget.id, 'reverse', reverseReason.trim());
+      const detailId = details?.advance.id;
+      setReverseTarget(undefined);
+      setReverseReason('');
+      setRefresh(x => x + 1);
+      if (target.isPayment && detailId) await loadDetails(detailId);
+      else { setSelectedAdvance(undefined); setDetails(undefined); }
+    } catch (e) {
+      setError(getApiErrorMessage(e, tx('advancesReverseError')));
+    } finally {
+      setReversing(false);
+    }
+  };
+
+  const clearFilters = () => {
+    setEmployeeName('');
+    setEmployeeNumber('');
+    setDepartmentId('');
+    setStatus('');
+    setFrom('');
+    setTo('');
+  };
+
+  const methodOptions = [
+    ['CASH', tx('advancesCash')],
+    ['BANK_TRANSFER', tx('advancesBankTransfer')],
+    ['CHECK', tx('advancesCheque')],
+    ['OTHER', tx('advancesOtherMethod')],
+  ];
+  const methodName = (value?: string | null) => ({
+    CASH: tx('advancesCash'),
+    BANK_TRANSFER: tx('advancesBankTransfer'),
+    CHECK: tx('advancesCheque'),
+    OTHER: tx('advancesOtherMethod'),
+  }[value ?? ''] ?? value ?? tx('advancesMissingValue'));
+  const dateTime = (value: string) => new Intl.DateTimeFormat(language === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+
+  const statusBadge = (value: Advance['status']) => {
+    const styles = value === 'SETTLED' ? 'bg-emerald-50 text-emerald-700' : value === 'PARTIAL' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700';
+    const label = value === 'SETTLED' ? tx('advancesFullySettled') : value === 'PARTIAL' ? tx('advancesPartiallySettled') : tx('advancesOpen');
+    return <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${styles}`}>{label}</span>;
+  };
+
+  const exportFilter = {
+    from: from || '2000-01-01',
+    to: to || cairoToday(),
+    employeeName: nameQuery || undefined,
+    employeeNumber: numberQuery || undefined,
+    departmentId: departmentId || undefined,
+    status: status || undefined,
+  };
+
+  return <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'} lang={language}>
+    <BookHeader eyebrow={tx('advancesPageEyebrow')} title={tx('advancesTitle')} description={tx('advancesDescription')}>
+      <AccountingExportButton report="advances" filter={exportFilter} label={tx('advancesExportExcel')} errorMessage={tx('advancesExportError')} />
+      {canCreateAdvance ? <AddButton onClick={() => void openAdvanceForm('advance')}>{tx('advancesDisburse')}</AddButton> : null}
+    </BookHeader>
+    <BookError error={error || employeeError} />
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <AccountingKpi label={tx('advancesTotalAdvances')} value={a.money(summary.totalAmount)} />
+      <AccountingKpi label={tx('advancesTotalPaid')} value={a.money(summary.totalPaid)} />
+      <AccountingKpi label={tx('advancesTotalRemaining')} value={a.money(summary.totalRemaining)} />
+      <AccountingKpi label={tx('advancesOpenCount')} value={a.number(summary.openCount)} />
+    </div>
+    <section className={`${panel} grid gap-4 sm:grid-cols-2 xl:grid-cols-6`}>
+      <BookField label={tx('advancesEmployeeName')}><input className="field" value={employeeName} onChange={e => setEmployeeName(e.target.value)} /></BookField>
+      <BookField label={tx('advancesEmployeeCode')}><input dir="ltr" className="field" value={employeeNumber} onChange={e => setEmployeeNumber(e.target.value)} /></BookField>
+      <BookField label={tx('advancesDepartment')}><ProfessionalSelect className="field" value={departmentId} onChange={e => setDepartmentId(e.target.value)}><option value="">{tx('advancesAllDepartments')}</option>{departments.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</ProfessionalSelect></BookField>
+      <BookField label={tx('advancesStatus')}><ProfessionalSelect className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="">{tx('advancesAllStatuses')}</option><option value="OPEN">{tx('advancesOpen')}</option><option value="PARTIAL">{tx('advancesPartiallySettled')}</option><option value="SETTLED">{tx('advancesFullySettled')}</option></ProfessionalSelect></BookField>
+      <BookField label={tx('advancesFromDate')}><DateControl dir="ltr" className="w-full" value={from} onChange={e => setFrom(e.target.value)} /></BookField>
+      <div className="flex items-end gap-2"><BookField label={tx('advancesToDate')}><DateControl dir="ltr" className="w-full" value={to} onChange={e => setTo(e.target.value)} /></BookField><ClearButton label={tx('advancesClearFilters')} onClick={clearFilters} /></div>
+    </section>
+    <div className="overflow-hidden rounded-2xl border border-mis-border bg-white">
+      <div className="overflow-x-auto"><table className={table}>
+        <thead><tr>{[
+          tx('advancesEmployeeCode'), tx('advancesEmployeeName'), tx('advancesDepartment'), tx('advancesAdvanceDate'),
+          tx('advancesOriginalAmount'), tx('advancesPaid'), tx('advancesRemaining'), tx('advancesReason'), tx('advancesStatusLabel'), tx('advancesActions'),
+        ].map((label, i) => <th key={i} className={cell}>{label}</th>)}</tr></thead>
+        <tbody>{rows.map(row => <tr key={row.id} className="cursor-pointer" onClick={() => { setSelectedAdvance(row); void loadDetails(row.id); }}>
+          <td dir="ltr" className={`${cell} font-mono text-xs`}>{row.employeeNumber}</td>
+          <td className={`${cell} font-bold text-mis-navy`}>{row.employeeName}</td>
+          <td className={cell}>{row.departmentName || tx('advancesMissingValue')}</td>
+          <td className={cell}>{a.date(row.date)}</td>
+          <td className={cell} data-bidi="ltr">{a.money(row.amount)}</td>
+          <td className={cell} data-bidi="ltr">{a.money(row.repaid)}</td>
+          <td className={`${cell} font-bold text-mis-primary`} data-bidi="ltr">{a.money(row.remaining)}</td>
+          <td className={`${cell} max-w-64 truncate`} title={row.reason}>{row.reason}</td>
+          <td className={cell}>{statusBadge(row.status)}</td>
+          <td className={cell}><Button fullWidth={false} variant="outline" size="sm" leftIcon={<Eye className="h-4 w-4" />} onClick={e => { e.stopPropagation(); setSelectedAdvance(row); void loadDetails(row.id); }}>{tx('advancesViewDetails')}</Button></td>
+        </tr>)}</tbody>
+      </table></div>
+      {loading ? <p className="p-8 text-center text-sm text-slate-500">{tx('advancesLoading')}</p> : !rows.length && !error ? <BookEmpty title={tx('advancesNoAdvances')} /> : null}
+    </div>
+
+    <Modal open={!!formMode} onClose={closeForm} title={formMode === 'payment' ? tx('advancesRegisterPayment') : tx('advancesNewAdvance')} size="lg">
+      <BookError error={formError} />
+      {formLoading ? <p className="p-5 text-slate-500">{tx('advancesLoadingAccounts')}</p> : <form noValidate onSubmit={saveForm} className="grid gap-4 sm:grid-cols-2">
+        {formMode === 'advance' ? <>
+          <BookField label={tx('advancesEmployee')}><ProfessionalSelect required className="field" value={form.employeeId ?? ''} onChange={e => setForm({ ...form, employeeId: e.target.value || undefined })}><option value="">{tx('advancesSelectEmployee')}</option>{employees.map(x => <option key={x.id} value={x.id}>{x.employeeNumber} · {x.fullName}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={tx('advancesEmployeeCode')}><input dir="ltr" className="field bg-slate-50" value={employee?.employeeNumber ?? ''} readOnly /></BookField>
+          <BookField label={tx('advancesDepartment')}><input className="field bg-slate-50" value={employee?.departmentName ?? ''} readOnly /></BookField>
+          <BookField label={tx('advancesAdvanceAmount')}><input required className="field" type="number" min="0.01" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} /></BookField>
+          <BookField label={tx('advancesAdvanceDate')}><DateControl dir="ltr" required max={cairoToday()} className="w-full" value={form.transactionDate} onChange={e => setForm({ ...form, transactionDate: e.target.value })} /></BookField>
+          <BookField label={tx('advancesPaymentMethod')}><ProfessionalSelect required className="field" value={form.paymentMethod ?? ''} onChange={e => setForm({ ...form, paymentMethod: e.target.value })}><option value="">{tx('advancesSelectDisbursementMethod')}</option>{methodOptions.map(x => <option key={x[0]} value={x[0]}>{x[1]}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={tx('advancesCashBankAccount')}><ProfessionalSelect required className="field" value={form.counterAccountId} onChange={e => setForm({ ...form, counterAccountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{usableAccounts.filter(x => x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={tx('advancesAccountingAccount')}><ProfessionalSelect required className="field" value={form.accountId} onChange={e => setForm({ ...form, accountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{usableAccounts.filter(x => x.accountType === 'ASSET' && !x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={`${tx('advancesReferenceNumber')} ${tx('advancesOptional')}`}><input dir="ltr" className="field" maxLength={160} value={form.reference ?? ''} onChange={e => setForm({ ...form, reference: e.target.value })} /></BookField>
+          <div className="sm:col-span-2"><BookField label={tx('advancesReason')}><textarea required maxLength={1000} className="field min-h-20" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></BookField></div>
+          <div className="sm:col-span-2"><BookField label={`${tx('advancesNotes')} ${tx('advancesOptional')}`}><textarea maxLength={1000} className="field min-h-20" value={form.notes ?? ''} onChange={e => setForm({ ...form, notes: e.target.value })} /></BookField></div>
+        </> : <>
+          <div className="rounded-xl bg-slate-50 p-4 sm:col-span-2"><p className="font-bold text-mis-navy">{selectedAdvance?.employeeName} · {selectedAdvance?.employeeNumber}</p><p className="mt-1 text-sm text-slate-600">{tx('advancesCurrentBalance')} <strong>{a.money(selectedAdvance?.remaining ?? 0)}</strong></p></div>
+          <BookField label={tx('advancesPaymentAmount')}><input required className="field" type="number" min="0.01" step="0.01" max={selectedAdvance?.remaining ?? 0} value={form.amount || ''} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} /></BookField>
+          <BookField label={tx('advancesPaymentDate')}><DateControl dir="ltr" required min={selectedAdvance?.date} max={cairoToday()} className="w-full" value={form.transactionDate} onChange={e => setForm({ ...form, transactionDate: e.target.value })} /></BookField>
+          <BookField label={tx('advancesSettlementMethod')}><ProfessionalSelect required className="field" value={form.paymentMethod ?? ''} onChange={e => setForm({ ...form, paymentMethod: e.target.value })}><option value="">{tx('advancesSelectSettlementMethod')}</option>{methodOptions.map(x => <option key={x[0]} value={x[0]}>{x[1]}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={tx('advancesCashBankAccount')}><ProfessionalSelect required className="field" value={form.counterAccountId} onChange={e => setForm({ ...form, counterAccountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{usableAccounts.filter(x => x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={`${tx('advancesReferenceNumber')} ${tx('advancesOptional')}`}><input dir="ltr" className="field" maxLength={160} value={form.reference ?? ''} onChange={e => setForm({ ...form, reference: e.target.value })} /></BookField>
+          <div className="sm:col-span-2"><BookField label={`${tx('advancesNotes')} ${tx('advancesOptional')}`}><textarea maxLength={1000} className="field min-h-20" value={form.notes ?? ''} onChange={e => setForm({ ...form, notes: e.target.value })} /></BookField></div>
+        </>}
+        <div className="flex gap-2 sm:col-span-2"><Button type="submit" fullWidth={false} isLoading={saving}>{formMode === 'payment' ? tx('advancesSavePayment') : tx('advancesSaveAdvance')}</Button><Button type="button" variant="outline" fullWidth={false} onClick={closeForm}>{tx('advancesCancel')}</Button></div>
+      </form>}
+    </Modal>
+
+    <Modal open={!!selectedAdvance && !formMode} onClose={() => { setSelectedAdvance(undefined); setDetails(undefined); }} title={tx('advancesDetails')} size="xl">
+      {detailsLoading || !details ? <p className="p-5 text-slate-500">{tx('advancesLoadingDetails')}</p> : <div className="space-y-5">
+        <BookError error={error} />
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-mis-navy">{details.advance.employeeName}</h3><p className="text-sm text-slate-500"><span dir="ltr">{details.advance.employeeNumber}</span> · {details.advance.departmentName || tx('advancesMissingValue')}</p></div><div className="flex flex-wrap gap-2">{canCreateAdvance && details.advance.remaining > 0 && <Button fullWidth={false} onClick={() => void openAdvanceForm('payment', details.advance)}>{tx('advancesRegisterPayment')}</Button>}{canReverseAdvance ? <Button fullWidth={false} variant="outline" leftIcon={<RotateCcw className="h-4 w-4" />} disabled={details.payments.length > 0} onClick={() => { setReverseReason(''); setReverseTarget({ id: details.advance.id, isPayment: false, label: details.advance.documentNumber }); }}>{tx('advancesVoid')}</Button> : null}</div></div>
+        {details.payments.length > 0 ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{tx('advancesVoidWarning')}</p> : null}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[
+          [tx('advancesOriginalAmount'), a.money(details.advance.amount)],
+          [tx('advancesAdvanceDate'), a.date(details.advance.date)],
+          [tx('advancesTotalPaid'), a.money(details.advance.repaid)],
+          [tx('advancesRemaining'), a.money(details.advance.remaining)],
+          [tx('advancesEmployeeOutstanding'), a.money(details.employeeTotalOutstanding)],
+          [tx('advancesStatusLabel'), statusBadge(details.advance.status)],
+          [tx('advancesPaymentMethod'), methodName(details.advance.paymentMethod)],
+          [tx('advancesReferenceNumber'), details.advance.reference || tx('advancesMissingValue')],
+        ].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-mis-border p-3"><p className="text-xs text-slate-500">{label}</p><div className="mt-1 font-semibold text-mis-navy" data-bidi="ltr">{value}</div></div>)}</div>
+        <div className="grid gap-3 rounded-xl bg-slate-50 p-4 sm:grid-cols-2"><div><p className="text-xs text-slate-500">{tx('advancesReason')}</p><p className="mt-1 font-medium">{details.advance.reason}</p></div><div><p className="text-xs text-slate-500">{tx('advancesNotes')}</p><p className="mt-1">{details.advance.notes || tx('advancesMissingValue')}</p></div><div className="text-xs text-slate-500">{tx('advancesCreatedBy')} <strong className="text-slate-700">{details.advance.createdBy}</strong> · {tx('advancesCreatedAt')} {dateTime(details.advance.createdAt)}</div></div>
+        <div><h4 className="mb-3 font-bold text-mis-navy">{tx('advancesPaymentHistory')}</h4><div className="overflow-x-auto rounded-xl border border-mis-border"><table className={table}><thead><tr>{[tx('advancesPaymentDate'), tx('advancesPaymentAmount'), tx('advancesSettlementMethod'), tx('advancesReferenceNumber'), tx('advancesNotes'), tx('advancesHistoryCreatedByAt'), tx('advancesBalanceAfterPayment'), ...(canReverseAdvance ? [tx('advancesActions')] : [])].map((label, i) => <th key={i} className={cell}>{label}</th>)}</tr></thead><tbody>{details.payments.map(payment => <tr key={payment.id}><td className={cell}>{a.date(payment.date)}</td><td className={cell} data-bidi="ltr">{a.money(payment.amount)}</td><td className={cell}>{methodName(payment.paymentMethod)}</td><td className={cell} dir="ltr">{payment.reference || tx('advancesMissingValue')}</td><td className={cell}>{payment.notes || tx('advancesMissingValue')}</td><td className={cell}><p>{payment.createdBy}</p><p className="text-xs text-slate-500">{dateTime(payment.createdAt)}</p></td><td className={cell} data-bidi="ltr">{a.money(payment.remainingAfter)}</td>{canReverseAdvance ? <td className={cell}><Button fullWidth={false} size="sm" variant="ghost" onClick={() => { setReverseReason(''); setReverseTarget({ id: payment.id, isPayment: true, label: a.money(payment.amount) }); }}>{tx('advancesReversePayment')}</Button></td> : null}</tr>)}</tbody></table>{!details.payments.length ? <BookEmpty title={tx('advancesNoPayments')}><span>{tx('advancesNoPaymentsHelp')}</span></BookEmpty> : null}</div></div>
+      </div>}
+    </Modal>
+
+    <ConfirmDialog open={!!reverseTarget} title={reverseTarget?.isPayment ? tx('advancesConfirmPaymentReversal') : tx('advancesConfirmVoid')} confirmLabel={tx('advancesConfirmReversal')} confirmVariant="danger" isConfirming={reversing} onCancel={() => setReverseTarget(undefined)} onConfirm={() => void reverse()} message={<div className="space-y-3"><p>{reverseTarget?.label}</p><p>{tx('advancesReversalHelp')}</p><BookField label={tx('advancesReversalReason')}><textarea required minLength={3} maxLength={1000} className="field min-h-20" value={reverseReason} onChange={e => setReverseReason(e.target.value)} /></BookField><BookError error={error} /></div>} />
   </div>;
 }

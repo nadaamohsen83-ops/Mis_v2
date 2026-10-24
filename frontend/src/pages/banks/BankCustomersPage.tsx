@@ -1,4 +1,3 @@
-import { formatMoney } from '../../utils/formatMoney';
 import { Eye, FileUp, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
@@ -16,7 +15,7 @@ import type { BankWorkspaceContext } from './BankWorkspaceLayout';
 
 export function BankCustomersPage() {
   const { bank, workspaceBase } = useOutletContext<BankWorkspaceContext>();
-  const { language, ct } = useCollectionsLocalization();
+  const { ct } = useCollectionsLocalization();
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -24,7 +23,6 @@ export function BankCustomersPage() {
   const [data, setData] = useState<BankCustomerPage>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const money = (value: number) => formatMoney(value, language === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 });
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(searchInput.trim()); setPage(1); }, 300);
@@ -47,6 +45,7 @@ export function BankCustomersPage() {
         <div>
           <h2 className="text-xl font-bold text-mis-navy">{ct('customers')}</h2>
           <p className="mt-1 text-sm text-slate-500">{ct('customersDescription')}</p>
+          <p className="mt-1 text-sm font-semibold text-mis-primary">{ct('customerCount')}: {data?.totalCount ?? 0}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button fullWidth={false} onClick={() => setReload((value) => value + 1)} variant="outline"><RefreshCw className="h-4 w-4" />{ct('refresh')}</Button>
@@ -55,7 +54,7 @@ export function BankCustomersPage() {
       </div>
       <label className="relative block">
         <Search className="absolute start-3 top-3 h-5 w-5 text-mis-muted" />
-        <input className="h-11 w-full rounded-xl border border-mis-control pe-3 ps-10 text-sm outline-none" onChange={(event) => setSearchInput(event.target.value)} placeholder={ct('searchCustomers')} value={searchInput} />
+        <input className="h-11 w-full rounded-xl border border-mis-control pe-3 ps-10 text-sm outline-none" onChange={(event) => setSearchInput(event.target.value)} placeholder={ct('searchBankCustomers')} value={searchInput} />
       </label>
       <div className="overflow-hidden rounded-2xl border border-mis-border bg-white">
         {loading ? <div className="flex min-h-72 items-center justify-center"><LoadingSpinner /></div>
@@ -66,21 +65,19 @@ export function BankCustomersPage() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                       <tr>
-                        {[ct('customerName'), ct('mobile'), ct('nationalId'), ct('accountContract'), ct('totalOutstanding'), ct('paidAmount'), ct('remainingAmount'), ct('status'), ct('collector'), ct('actions')].map((label) => <th className="px-4 py-3 text-start" key={label}>{label}</th>)}
+                        {[ct('customerCode'), ct('customerName'), ct('mobile'), ct('nationalId'), ct('accountNumber'), ct('portfolio'), ct('status'), ct('actions')].map((label) => <th className="px-4 py-3 text-start" key={label}>{label}</th>)}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-mis-border">
                       {data.items.map((item) => (
                         <tr className="hover:bg-slate-50" key={item.id}>
+                          <td className="px-4 py-3 font-mono text-xs" dir="ltr">{item.customerCode}</td>
                           <td className="px-4 py-3 font-semibold text-mis-navy">{item.customerName}</td>
                           <td className="px-4 py-3" data-bidi="ltr">{item.mobile ?? '—'}</td>
                           <td className="px-4 py-3" data-bidi="ltr">{item.nationalId ?? '—'}</td>
                           <td className="px-4 py-3" data-bidi="ltr">{item.accountReference ?? item.contractReference ?? '—'}</td>
-                          <td className="px-4 py-3" data-bidi="ltr">{money(item.outstandingAmount)}</td>
-                          <td className="px-4 py-3" data-bidi="ltr">{money(item.paidAmount)}</td>
-                          <td className="px-4 py-3" data-bidi="ltr">{money(item.remainingAmount)}</td>
-                          <td className="px-4 py-3">{item.status ? <StatusBadge>{ct(item.status as never) || item.status}</StatusBadge> : '—'}</td>
-                          <td className="px-4 py-3">{item.assignedCollectorName ?? '—'}</td>
+                          <td className="px-4 py-3">{[item.portfolioName, item.productType].filter(Boolean).join(' · ') || '—'}</td>
+                          <td className="px-4 py-3">{item.status ? <StatusBadge>{ct(item.status) || item.status}</StatusBadge> : '—'}</td>
                           <td className="px-4 py-3"><Link className="inline-flex items-center gap-1 rounded-lg border border-mis-border px-3 py-1.5 text-xs font-bold text-mis-primary" to={`${workspaceBase}/customers/${item.id}`}><Eye className="h-3.5 w-3.5" />{ct('viewDetails')}</Link></td>
                         </tr>
                       ))}

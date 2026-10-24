@@ -567,7 +567,7 @@ IDs are represented as route parameters. “Synthetic” means the detail respon
 | `/finance/accounts` | PASS | Live / existing empty state |
 | `/finance/advances` | PASS | Live / existing empty state |
 | `/finance/bonuses` | PASS | Live / existing empty state |
-| `/finance/carried-advances` | PASS | Live / existing empty state |
+| `/finance/advances` | PASS | Live / advances and settlement history |
 | `/finance/collections` | PASS | Live / existing empty state |
 | `/finance/collector-commissions` | PASS | Live / existing empty state |
 | `/finance/commission-calculation` | PASS | Live / existing empty state |

@@ -12,6 +12,7 @@ public sealed class AccountingBookEntryConfiguration : IEntityTypeConfiguration<
         b.HasKey(x => x.Id); b.Property(x => x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x => x.Category).HasMaxLength(40).IsRequired();
         b.Property(x => x.Amount).HasPrecision(18, 2); b.Property(x => x.TransactionDate).HasColumnType("date"); b.Property(x => x.Description).HasMaxLength(1000).IsRequired();
         b.Property(x => x.Reference).HasMaxLength(160); b.Property(x => x.SourceKey).HasMaxLength(150);
+        b.Property(x => x.PaymentMethod).HasMaxLength(80); b.Property(x => x.Notes).HasMaxLength(1000);
         b.HasIndex(x => x.DocumentNumber).IsUnique(); b.HasIndex(x => x.SourceKey).IsUnique(); b.HasIndex(x => new { x.Category, x.TransactionDate }); b.HasIndex(x => x.EmployeeId);
         b.HasIndex(x => x.JournalEntryId).IsUnique();
         b.HasOne(x => x.Account).WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);

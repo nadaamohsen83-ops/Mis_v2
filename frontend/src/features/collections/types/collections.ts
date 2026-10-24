@@ -26,6 +26,9 @@ export interface BankCustomerListItem {
   status?: string | null;
   assignedCollectorName?: string | null;
   caseCount: number;
+  customerCode: string;
+  portfolioName?: string | null;
+  productType?: string | null;
 }
 export interface BankCustomerPage { items: BankCustomerListItem[]; totalCount: number; page: number; pageSize: number; totalPages: number }
 export interface BankCustomerCaseSummary {
@@ -42,6 +45,11 @@ export interface BankCustomerDetails {
   totalOriginalAmount: number; totalOutstandingAmount: number; totalPaidAmount: number; totalRemainingAmount: number; totalOverdueAmount: number;
   cases: BankCustomerCaseSummary[]; payments: BankCustomerLinkSummary[]; promises: BankCustomerLinkSummary[];
   visits: BankCustomerLinkSummary[]; complaints: BankCustomerLinkSummary[]; activities: BankCustomerLinkSummary[]; timeline: BankCustomerLinkSummary[];
+  portfolioName?: string | null; productType?: string | null; importFileName?: string | null; importBatchNumber?: string | null;
+  importBatchStatus?: string | null; importedAt?: string | null; importedCustomerName?: string | null;
+  importedNationalId?: string | null; importedMobileNumber?: string | null; importedAddress?: string | null;
+  importAccountNumber?: string | null; importContractNumber?: string | null; importFeedback?: string | null; importNotes?: string | null;
+  importedPhones?: string[] | null; importedFields?: Record<string, string> | null;
 }
 export interface BankCustomerImportSheet { sheetName?: string | null; suggestedHeaderRowNumber: number; detectedColumns: string[] }
 export interface BankCustomerImportUpload { id: string; fileName: string; sheets: BankCustomerImportSheet[] }

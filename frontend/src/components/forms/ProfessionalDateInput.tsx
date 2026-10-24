@@ -72,7 +72,7 @@ function hasTime(value: string) {
 export function ProfessionalDateInput({
   id, name, value, defaultValue, onChange, mode = 'date', required, min, max, disabled, className = '', ariaLabel, ariaInvalid, ariaDescribedBy, comfortable = false, inputRef,
 }: ProfessionalDateInputProps) {
-  const { language, isRtl } = useLocalization();
+  const { language, isRtl, t } = useLocalization();
   const root = useRef<HTMLDivElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const typing = useRef(false);
@@ -127,9 +127,18 @@ export function ProfessionalDateInput({
   }, [controlled, defaultValue, mode]);
 
   const locale = language === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB';
-  const labels = language === 'ar'
-    ? { choose: mode === 'date' ? 'اختر أو اكتب التاريخ' : 'اختر أو اكتب التاريخ والوقت', today: 'اليوم', clear: 'مسح', done: 'تم', previous: 'الشهر السابق', next: 'الشهر التالي', time: 'الوقت', month: 'الشهر', year: 'السنة', open: 'فتح التقويم' }
-    : { choose: mode === 'date' ? 'Type or choose a date' : 'Type or choose date & time', today: 'Today', clear: 'Clear', done: 'Done', previous: 'Previous month', next: 'Next month', time: 'Time', month: 'Month', year: 'Year', open: 'Open calendar' };
+  const labels = {
+    choose: t(mode === 'date' ? 'datePickerChooseDate' : 'datePickerChooseDateTime'),
+    today: t('datePickerToday'),
+    clear: t('datePickerClear'),
+    done: t('datePickerDone'),
+    previous: t('datePickerPreviousMonth'),
+    next: t('datePickerNextMonth'),
+    time: t('datePickerTime'),
+    month: t('datePickerMonth'),
+    year: t('datePickerYear'),
+    open: t('datePickerOpen'),
+  };
   const placeholder = mode === 'datetime' ? '31/12/2026 09:00' : '31/12/2026';
   const minimum = min?.slice(0, 10) ?? '';
   const maximum = max?.slice(0, 10) ?? '';
@@ -259,11 +268,11 @@ export function ProfessionalDateInput({
           <Clock3 className="h-5 w-5 text-mis-primary" />
           <span className="text-xs font-bold text-slate-500">{labels.time}</span>
           <div className="ms-auto flex items-center gap-1" dir="ltr">
-            <ProfessionalSelect aria-label={language === 'ar' ? 'الساعة' : 'Hour'} className="h-9 min-h-9 py-1 w-20 rounded-lg border border-mis-control bg-white px-2 text-sm outline-none focus:border-mis-blue" onChange={(event) => setHour(event.target.value)} value={hour}>
+            <ProfessionalSelect aria-label={t('datePickerHour')} className="h-9 min-h-9 py-1 w-20 rounded-lg border border-mis-control bg-white px-2 text-sm outline-none focus:border-mis-blue" onChange={(event) => setHour(event.target.value)} value={hour}>
               {Array.from({ length: 24 }, (_, index) => pad(index)).map((item) => <option key={item}>{item}</option>)}
             </ProfessionalSelect>
             <span>:</span>
-            <ProfessionalSelect aria-label={language === 'ar' ? 'الدقيقة' : 'Minute'} className="h-9 min-h-9 py-1 w-20 rounded-lg border border-mis-control bg-white px-2 text-sm outline-none focus:border-mis-blue" onChange={(event) => setMinute(event.target.value)} value={minute}>
+            <ProfessionalSelect aria-label={t('datePickerMinute')} className="h-9 min-h-9 py-1 w-20 rounded-lg border border-mis-control bg-white px-2 text-sm outline-none focus:border-mis-blue" onChange={(event) => setMinute(event.target.value)} value={minute}>
               {minutes.map((item) => <option key={item}>{item}</option>)}
             </ProfessionalSelect>
           </div>

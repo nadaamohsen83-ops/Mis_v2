@@ -7,7 +7,8 @@ public sealed class AccountingBookEntry
     private AccountingBookEntry() { }
     public AccountingBookEntry(Guid id, string category, DateOnly date, decimal amount, Guid accountId, Guid counterAccountId,
         string description, string? reference, Guid journalId, Guid creatorId, DateTimeOffset createdAt,
-        Guid? employeeId = null, Guid? relatedAdvanceId = null, Guid? recurringId = null, string? sourceKey = null)
+        Guid? employeeId = null, Guid? relatedAdvanceId = null, Guid? recurringId = null, string? sourceKey = null,
+        string? paymentMethod = null, string? notes = null)
     {
         if (id == Guid.Empty || accountId == Guid.Empty || counterAccountId == Guid.Empty || journalId == Guid.Empty || creatorId == Guid.Empty) throw new ArgumentException("Accounting identities are required.");
         if (!AccountingBookValues.Categories.Contains(category)) throw new ArgumentException("Invalid accounting category.");
@@ -19,6 +20,8 @@ public sealed class AccountingBookEntry
         Id = id; Category = category; TransactionDate = date; Amount = amount; AccountId = accountId; CounterAccountId = counterAccountId;
         Description = description.Trim(); Reference = string.IsNullOrWhiteSpace(reference) ? null : reference.Trim(); JournalEntryId = journalId;
         CreatedById = creatorId; CreatedAt = createdAt; EmployeeId = employeeId; RelatedAdvanceId = relatedAdvanceId; RecurringExpenseId = recurringId; SourceKey = sourceKey;
+        PaymentMethod = string.IsNullOrWhiteSpace(paymentMethod) ? null : paymentMethod.Trim();
+        Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         DocumentNumber = $"ACC-{date:yyyyMM}-{id.ToString("N")[..10].ToUpperInvariant()}";
     }
     public Guid Id { get; private set; }
@@ -41,6 +44,8 @@ public sealed class AccountingBookEntry
     public Guid? RecurringExpenseId { get; private set; }
     public AccountingRecurringExpense? RecurringExpense { get; private set; }
     public string? SourceKey { get; private set; }
+    public string? PaymentMethod { get; private set; }
+    public string? Notes { get; private set; }
     public Guid CreatedById { get; private set; }
     public User CreatedBy { get; private set; } = null!;
     public DateTimeOffset CreatedAt { get; private set; }

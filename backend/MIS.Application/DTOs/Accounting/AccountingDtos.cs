@@ -15,11 +15,21 @@ public sealed record AccountingPayrollPeriodDto(Guid Id, int Year, int Month, st
 public sealed record AccountingEmployeePayrollDto(
     Guid Id, Guid PeriodId, Guid EmployeeId, string EmployeeNumber, string EmployeeName, string? DepartmentName, string? PositionName,
     decimal BasicSalary, decimal Allowances, decimal Transportation, decimal Commissions, decimal Bonuses, decimal Deductions,
-    decimal OtherAdjustments, decimal NetSalary, string Status, string? Notes, DateTimeOffset CreatedAt);
+    decimal OtherAdjustments, decimal NetSalary, string Status, string? Notes, DateTimeOffset CreatedAt,
+    string EmployeePayrollStatus, string? EmployeePayrollStatusReason, string? EmployeePayrollStatusChangedBy,
+    DateTimeOffset? EmployeePayrollStatusChangedAt, string PaymentStatus);
 
 public sealed record AccountingPayrollPageDto(IReadOnlyList<AccountingEmployeePayrollDto> Items, int Page, int PageSize, int TotalCount);
 public sealed record UpdateAccountingPayrollRequest(decimal Transportation, decimal Commissions, decimal Bonuses, decimal Deductions, decimal OtherAdjustments, [MaxLength(1000)] string? Notes);
 public sealed record GeneratePayrollRequest(int Year, int Month, [MaxLength(1000)] string? Notes);
+public sealed record ChangeEmployeePayrollStatusRequest(
+    [Required, MaxLength(40)] string Status,
+    [MaxLength(1000)] string? Reason);
+public sealed record BulkChangeEmployeePayrollStatusRequest(
+    [Required, MinLength(1), MaxLength(500)] IReadOnlyList<Guid> PayrollIds,
+    [Required, MaxLength(40)] string Status,
+    [MaxLength(1000)] string? Reason);
+public sealed record BulkPayAccountingPayrollRequest([Required, MinLength(1), MaxLength(500)] IReadOnlyList<Guid> PayrollIds);
 
 public sealed record AccountingTransportationDto(
     Guid Id, Guid EmployeeId, string EmployeeNumber, string EmployeeName, string? DepartmentName, string? PositionName,
@@ -52,4 +62,4 @@ public sealed record AccountingSupervisorCommissionDto(
 public sealed record AccountingCommissionPageDto<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount);
 public sealed record CalculateCommissionsRequest(int Year, int Month);
 public sealed record AdjustCommissionRequest(decimal Adjustments, [MaxLength(1000)] string? Notes);
-public sealed record AccountingLookupEmployeeDto(Guid Id, string EmployeeNumber, string FullName, string? DepartmentName, string? PositionName);
+public sealed record AccountingLookupEmployeeDto(Guid Id, string EmployeeNumber, string FullName, string? DepartmentName, string? PositionName, Guid? DepartmentId = null);

@@ -31,11 +31,26 @@ public sealed class AccountingController(IAccountingService accounting) : Contro
         => accounting.GeneratePayrollAsync(request, token);
 
     [HttpGet("salaries")]
-    public Task<AccountingPayrollPageDto> Salaries([FromQuery] Guid periodId, [FromQuery] string? search, [FromQuery] string? status, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken token = default)
-        => accounting.ListPayrollsAsync(periodId, search, status, page, pageSize, token);
+    public Task<AccountingPayrollPageDto> Salaries([FromQuery] Guid periodId, [FromQuery] string? search, [FromQuery] string? status, [FromQuery] string? employeeStatus, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken token = default)
+        => accounting.ListPayrollsAsync(periodId, search, status, employeeStatus, page, pageSize, token);
 
     [HttpGet("salaries/{id:guid}")]
     public Task<AccountingEmployeePayrollDto> Salary(Guid id, CancellationToken token) => accounting.GetPayrollAsync(id, token);
+
+    [HttpPut("salaries/{id:guid}/employee-status")]
+    [Authorize(Policy = AuthorizationPolicies.AccountingPayrollManage)]
+    public Task<AccountingEmployeePayrollDto> ChangeEmployeePayrollStatus(Guid id, [FromBody] ChangeEmployeePayrollStatusRequest request, CancellationToken token)
+        => accounting.ChangeEmployeePayrollStatusAsync(id, request, token);
+
+    [HttpPost("salaries/employee-status/bulk")]
+    [Authorize(Policy = AuthorizationPolicies.AccountingPayrollManage)]
+    public Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkChangeEmployeePayrollStatus([FromBody] BulkChangeEmployeePayrollStatusRequest request, CancellationToken token)
+        => accounting.BulkChangeEmployeePayrollStatusAsync(request, token);
+
+    [HttpPost("salaries/pay/bulk")]
+    [Authorize(Policy = AuthorizationPolicies.AccountingPayrollManage)]
+    public Task<IReadOnlyList<AccountingEmployeePayrollDto>> BulkPaySalaries([FromBody] BulkPayAccountingPayrollRequest request, CancellationToken token)
+        => accounting.BulkPayPayrollsAsync(request, token);
 
     [HttpPut("salaries/{id:guid}")]
     [Authorize(Policy = AuthorizationPolicies.AccountingPayrollManage)]

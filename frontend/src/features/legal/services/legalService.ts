@@ -1,8 +1,12 @@
-import { apiClient } from '../../../services/apiClient';
+import { apiClient, requestFormData } from '../../../services/apiClient';
 import type {
   LegalCaseDetails,
   LegalCasePage,
   LegalDashboard,
+  LegalImportHistoryItem,
+  LegalImportPreview,
+  LegalImportResult,
+  LegalImportSourceRow,
   LegalOrganization,
   RecordLegalActionInput,
   SaveLegalFileInput,
@@ -39,5 +43,29 @@ export const legalService = {
 
   async recordAction(collectionCaseId: string, input: RecordLegalActionInput) {
     return (await apiClient.post<LegalCaseDetails>(`/legal/cases/${collectionCaseId}/actions`, input)).data;
+  },
+
+  async downloadImportTemplate() {
+    const response = await apiClient.get<Blob>('/legal/imports/template', { responseType: 'blob' });
+    const url = URL.createObjectURL(response.data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'Legal_Cases_Import_Template.xlsx';
+    link.click();
+    URL.revokeObjectURL(url);
+  },
+
+  async previewImport(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestFormData<LegalImportPreview>('/legal/imports/preview', formData);
+  },
+
+  async importCases(fileName: string, rows: LegalImportSourceRow[]) {
+    return (await apiClient.post<LegalImportResult>('/legal/imports', { fileName, rows })).data;
+  },
+
+  async importHistory() {
+    return (await apiClient.get<LegalImportHistoryItem[]>('/legal/imports/history')).data;
   },
 };

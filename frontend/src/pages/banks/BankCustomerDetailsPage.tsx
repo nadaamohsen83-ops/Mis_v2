@@ -58,13 +58,36 @@ export function BankCustomerDetailsPage() {
           <Field label={ct('alternativeMobile')} value={data.alternativeMobile} />
           <Field label={ct('nationalId')} value={data.nationalId} />
           <Field label={ct('customerCode')} value={data.customerCode} />
-          <Field label={ct('accountContract')} value={data.cases[0]?.accountReference ?? data.cases[0]?.contractReference} />
+          <Field label={ct('accountContract')} value={data.cases[0]?.accountReference ?? data.importAccountNumber ?? data.cases[0]?.contractReference ?? data.importContractNumber} />
           <Field label={ct('address1')} value={addresses.address1} wide />
           <Field label={ct('secondaryAddress')} value={addresses.address2} wide />
         </div>
       </Card>
 
+      {data.importBatchNumber || data.importFileName || data.importedFields || data.importNotes || data.importFeedback ? (
+        <Card title={ct('importInformation')}>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <Field label={ct('portfolio')} value={data.portfolioName} />
+            <Field label={ct('product')} value={data.productType} />
+            <Field label={ct('importBatch')} value={data.importBatchNumber} />
+            <Field label={ct('importFile')} value={data.importFileName} />
+            <Field label={ct('importDate')} value={date(data.importedAt)} />
+            <Field label={ct('importStatus')} value={data.importBatchStatus} />
+            <Field label={ct('importedCustomerName')} value={data.importedCustomerName} />
+            <Field label={ct('importedNationalId')} value={data.importedNationalId} />
+            <Field label={ct('accountNumber')} value={data.importAccountNumber} />
+            <Field label={ct('importedAddress')} value={data.importedAddress} wide />
+            <Field label={ct('importedMobileNumbers')} value={[...(data.importedPhones ?? []), data.importedMobileNumber].filter((phone, index, phones): phone is string => Boolean(phone) && phones.indexOf(phone) === index).join(' · ')} wide />
+            <Field label={ct('accountContract')} value={data.importContractNumber} />
+            <Field label={ct('importedFeedback')} value={data.importFeedback} wide />
+            <Field label={ct('importedNotes')} value={data.importNotes} wide />
+            {Object.entries(data.importedFields ?? {}).map(([name, value]) => <Field key={name} label={name} value={value} />)}
+          </div>
+        </Card>
+      ) : null}
+
       <Card title={ct('organizationInformation')}>
+        {data.cases.length === 0 ? <p className="text-sm text-slate-500">{ct('noCollectionCasesYet')}</p> : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{[ct('caseId'), ct('portfolio'), ct('accountContract'), ct('collector'), ct('status'), ct('actions')].map((label) => <th className="px-3 py-2 text-start" key={label}>{label}</th>)}</tr></thead>
@@ -82,6 +105,7 @@ export function BankCustomerDetailsPage() {
             </tbody>
           </table>
         </div>
+        )}
       </Card>
 
       <Card title={ct('financialInformation')}>

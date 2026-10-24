@@ -38,6 +38,11 @@ export type AccountingEmployeePayroll = {
   status: string;
   notes?: string | null;
   createdAt: string;
+  employeePayrollStatus: string;
+  employeePayrollStatusReason?: string | null;
+  employeePayrollStatusChangedBy?: string | null;
+  employeePayrollStatusChangedAt?: string | null;
+  paymentStatus: string;
 };
 
 export type AccountingPaged<T> = {
@@ -125,6 +130,7 @@ export type AccountingLookupEmployee = {
   employeeNumber: string;
   fullName: string;
   departmentName?: string | null;
+  departmentId?: string | null;
   positionName?: string | null;
 };
 

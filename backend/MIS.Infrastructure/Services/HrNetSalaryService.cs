@@ -30,7 +30,8 @@ public sealed class HrNetSalaryService(ApplicationDbContext db, ICurrentUserCont
         var employees = await db.Employees.AsNoTracking()
             .Include(item => item.Department)
             .Include(item => item.Position)
-            .Where(item => !item.IsArchived && item.Status != Employee.TerminatedStatus)
+            .Where(item => !item.IsArchived
+                && (item.Status != Employee.TerminatedStatus || item.TerminationDate >= start))
             .OrderBy(item => item.EmployeeNumber)
             .ToListAsync(cancellationToken);
 

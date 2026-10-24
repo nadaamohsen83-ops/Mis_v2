@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MIS.Application.Common;
 using MIS.Application.DTOs.Collections;
@@ -10,6 +11,9 @@ namespace MIS.Infrastructure.Services;
 
 public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserContext user, ICollectionsClassificationContext classification) : IBankCustomerService
 {
+    private sealed record ImportedProfile(IReadOnlyList<string>? Phones, IReadOnlyDictionary<string, string>? Columns);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private bool Has(string role) => user.Roles.Contains(role, StringComparer.OrdinalIgnoreCase);
     private bool Global => Has(SystemRoleNames.Admin) || Has(SystemRoleNames.CollectionsOperationsManager);
     private bool Manager => Global || Has(SystemRoleNames.CollectionsSupervisor);
@@ -21,7 +25,10 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
         ValidatePage(query.Page, query.PageSize);
         var ar = ApiTextLocalizer.IsArabic;
         var cases = ScopedCases(organizationId).AsNoTracking();
-        var customers = db.CollectionCustomers.AsNoTracking().Where(c => c.OrganizationId == organizationId && cases.Any(x => x.CustomerId == c.Id));
+        var imports = ScopedImportRows(organizationId);
+        var customers = db.CollectionCustomers.AsNoTracking().Where(c =>
+            c.OrganizationId == organizationId &&
+            (cases.Any(x => x.CustomerId == c.Id) || imports.Any(x => x.CollectionCustomerId == c.Id)));
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -34,6 +41,12 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
                 (c.PrimaryPhone != null && c.PrimaryPhone.Contains(term)) ||
                 (c.AlternatePhone != null && c.AlternatePhone.Contains(term)) ||
                 (c.NationalId != null && c.NationalId.Contains(term)) ||
+                imports.Any(x => x.CollectionCustomerId == c.Id && (
+                    x.CustomerName.ToLower().Contains(term) ||
+                    (x.MobileNumber != null && x.MobileNumber.Contains(term)) ||
+                    (x.NationalId != null && x.NationalId.Contains(term)) ||
+                    (x.AccountNumber != null && x.AccountNumber.ToLower().Contains(term)) ||
+                    (x.ContractNumber != null && x.ContractNumber.ToLower().Contains(term)))) ||
                 cases.Any(x => x.CustomerId == c.Id && (
                     x.AccountReference.ToLower().Contains(term) ||
                     (x.ContractReference != null && x.ContractReference.ToLower().Contains(term)) ||
@@ -49,6 +62,7 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
             .Select(c => new
             {
                 c.Id,
+                c.CustomerCode,
                 Name = ar ? c.FullNameArabic ?? c.FullNameEnglish! : c.FullNameEnglish ?? c.FullNameArabic!,
                 c.PrimaryPhone,
                 c.NationalId,
@@ -60,14 +74,32 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
                     x.AccountReference,
                     x.ContractReference,
                     x.Status,
+                    PortfolioName = ar ? x.Portfolio.NameArabic : x.Portfolio.NameEnglish,
+                    x.ProductType,
                     Collector = x.AssignedCollector == null ? null : x.AssignedCollector.FullName
-                }).FirstOrDefault()
+                }).FirstOrDefault(),
+                Imported = imports.Where(x => x.CollectionCustomerId == c.Id)
+                    .OrderByDescending(x => x.Batch.CreatedAt)
+                    .Select(x => new
+                    {
+                        x.AccountNumber,
+                        x.ContractNumber,
+                        x.MobileNumber,
+                        x.NationalId,
+                        x.Batch.Portfolio.NameArabic,
+                        x.Batch.Portfolio.NameEnglish,
+                        x.Batch.SubClassification,
+                        PortfolioPrimary = x.Batch.Portfolio.PrimaryClassification
+                    }).FirstOrDefault()
             }).ToArrayAsync(token);
 
         var items = pageCustomers.Select(c => new BankCustomerListItemDto(
-            c.Id, c.Name, c.PrimaryPhone, c.NationalId,
-            c.Primary?.AccountReference, c.Primary?.ContractReference,
-            c.Outstanding, c.Paid, c.Outstanding, c.Primary?.Status, c.Primary?.Collector, c.CaseCount)).ToArray();
+            c.Id, c.Name, c.PrimaryPhone ?? c.Imported?.MobileNumber, c.NationalId ?? c.Imported?.NationalId,
+            c.Primary?.AccountReference ?? c.Imported?.AccountNumber, c.Primary?.ContractReference ?? c.Imported?.ContractNumber,
+            c.Outstanding, c.Paid, c.Outstanding, c.Primary?.Status ?? "IMPORTED", c.Primary?.Collector, c.CaseCount,
+            c.CustomerCode,
+            c.Primary?.PortfolioName ?? (c.Imported is null ? null : (ar ? c.Imported.NameArabic : c.Imported.NameEnglish)),
+            c.Primary?.ProductType ?? c.Imported?.SubClassification ?? c.Imported?.PortfolioPrimary)).ToArray();
 
         return new BankCustomerPageDto(items, total, query.Page, query.PageSize, total == 0 ? 0 : (int)Math.Ceiling(total / (double)query.PageSize));
     }
@@ -81,16 +113,18 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
             .SingleOrDefaultAsync(c => c.Id == customerId && c.OrganizationId == organizationId, token)
             ?? throw new HrNotFoundException("Customer was not found for this organization.");
 
-        var caseIds = await ScopedCases(organizationId).AsNoTracking().Where(x => x.CustomerId == customerId).Select(x => x.Id).ToArrayAsync(token);
-        if (caseIds.Length == 0 && !Global && !Manager)
+        var scopedCases = ScopedCases(organizationId).AsNoTracking();
+        var caseIds = await scopedCases.Where(x => x.CustomerId == customerId).Select(x => x.Id).ToArrayAsync(token);
+        var importedRow = await ScopedImportRows(organizationId)
+            .Where(x => x.CollectionCustomerId == customerId)
+            .Include(x => x.Batch).ThenInclude(x => x.Portfolio)
+            .OrderByDescending(x => x.Batch.CreatedAt)
+            .ThenByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(token);
+        if (caseIds.Length == 0 && importedRow is null)
             throw new HrNotFoundException("Customer was not found for this organization.");
-        if (caseIds.Length == 0 && !(await ScopedCases(organizationId).AnyAsync(x => x.CustomerId == customerId, token)) && !Global)
-        {
-            // Collector with no assigned cases for this customer cannot open them.
-            if (Collector) throw new HrNotFoundException("Customer was not found for this organization.");
-        }
 
-        var cases = await ScopedCases(organizationId).AsNoTracking()
+        var cases = await scopedCases
             .Where(x => x.CustomerId == customerId)
             .OrderByDescending(x => x.UpdatedAt)
             .Select(x => new
@@ -113,9 +147,6 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
                 x.LastPaymentAt,
                 x.NextFollowUpAt
             }).ToArrayAsync(token);
-
-        if (cases.Length == 0)
-            throw new HrNotFoundException("Customer was not found for this organization.");
 
         var payments = await db.CollectionPayments.AsNoTracking()
             .Where(p => caseIds.Contains(p.CaseId) && p.Status == CollectionsValues.PaymentStatuses.Approved)
@@ -154,6 +185,16 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
         var (address1, address2) = CollectionFileRowMapper.SeparateAddresses(
             ar ? customer.AddressArabic ?? customer.AddressEnglish : customer.AddressEnglish ?? customer.AddressArabic,
             customer.SecondaryAddress);
+        var importedProfile = ReadImportedProfile(importedRow?.FieldsJson);
+        var importedPhones = importedProfile?.Phones?.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+        if ((importedPhones is null || importedPhones.Length == 0) && !string.IsNullOrWhiteSpace(importedRow?.MobileNumber))
+            importedPhones = [importedRow.MobileNumber];
+        var portfolio = importedRow?.Batch.Portfolio;
+        var portfolioName = cases.FirstOrDefault()?.PortfolioName
+            ?? (portfolio is null ? null : ar ? portfolio.NameArabic : portfolio.NameEnglish);
+        var productType = cases.FirstOrDefault()?.ProductType
+            ?? importedRow?.Batch.SubClassification
+            ?? portfolio?.SubClassification;
 
         return new BankCustomerDetailsDto(
             customer.Id,
@@ -181,10 +222,66 @@ public sealed class BankCustomerService(ApplicationDbContext db, ICurrentUserCon
             visits,
             complaints,
             activities,
-            timeline);
+            timeline,
+            portfolioName,
+            productType,
+            importedRow?.Batch.FileName,
+            importedRow?.Batch.BatchNumber,
+            importedRow?.Batch.Status,
+            importedRow?.Batch.CreatedAt,
+            importedRow?.CustomerName,
+            importedRow?.NationalId,
+            importedRow?.MobileNumber,
+            importedRow?.Address,
+            importedRow?.AccountNumber,
+            importedRow?.ContractNumber,
+            importedRow?.Feedback,
+            importedRow?.Notes,
+            importedPhones,
+            importedProfile?.Columns);
     }
 
     private IQueryable<CollectionCase> ScopedCases(Guid organizationId) => ScopedCasesCore(organizationId).Apply(classification);
+
+    private IQueryable<DataEntryRow> ScopedImportRows(Guid organizationId)
+    {
+        var rows = db.DataEntryRows.AsNoTracking()
+            .Where(x => x.IsValid && x.CollectionCustomerId != null
+                && x.Batch.OrganizationId == organizationId
+                && x.Batch.Portfolio.OrganizationId == organizationId);
+        if (classification.HasValue)
+        {
+            rows = rows.Where(x =>
+                (x.Batch.PrimaryClassification ?? x.Batch.Portfolio.PrimaryClassification) == classification.Primary
+                && (x.Batch.SubClassification ?? x.Batch.Portfolio.SubClassification) == classification.Sub);
+        }
+
+        if (Global) return rows;
+        if (Manager)
+        {
+            return rows.Where(x =>
+                db.CollectionUserAccess.Any(access => access.UserId == user.UserId
+                    && access.OrganizationId == organizationId
+                    && (access.PortfolioId == null || access.PortfolioId == x.Batch.PortfolioId))
+                || db.CollectionCases.Any(collectionCase => collectionCase.PortfolioId == x.Batch.PortfolioId
+                    && !collectionCase.IsArchived
+                    && collectionCase.AssignedTeam != null
+                    && collectionCase.AssignedTeam.SupervisorId == user.UserId));
+        }
+
+        var cases = ScopedCases(organizationId);
+        return rows.Where(x => cases.Any(collectionCase =>
+            collectionCase.CustomerId == x.CollectionCustomerId
+            && collectionCase.PortfolioId == x.Batch.PortfolioId));
+    }
+
+    private static ImportedProfile? ReadImportedProfile(string? fieldsJson)
+    {
+        if (string.IsNullOrWhiteSpace(fieldsJson)) return null;
+        try { return JsonSerializer.Deserialize<ImportedProfile>(fieldsJson, JsonOptions); }
+        catch (JsonException) { return null; }
+    }
+
     private IQueryable<CollectionCase> ScopedCasesCore(Guid organizationId)
     {
         var baseQuery = db.CollectionCases.Where(x => x.Portfolio.OrganizationId == organizationId && !x.IsArchived);

@@ -43,7 +43,8 @@ public sealed class AccountingEmployeePayroll
 
     public AccountingEmployeePayroll(
         Guid periodId, Guid employeeId, string employeeNumber, string employeeName, string? departmentName, string? positionName,
-        decimal basicSalary, decimal allowances, Guid? compensationSnapshotId, DateTimeOffset createdAt)
+        decimal basicSalary, decimal allowances, Guid? compensationSnapshotId, DateTimeOffset createdAt,
+        string employeePayrollStatus = AccountingValues.EmployeePayrollStatuses.Active)
     {
         if (periodId == Guid.Empty || employeeId == Guid.Empty) throw new ArgumentException("Period and employee are required.");
         ArgumentException.ThrowIfNullOrWhiteSpace(employeeNumber);
@@ -53,7 +54,7 @@ public sealed class AccountingEmployeePayroll
         EmployeeNumber = employeeNumber.Trim(); EmployeeName = employeeName.Trim();
         DepartmentName = NullIfEmpty(departmentName); PositionName = NullIfEmpty(positionName);
         BasicSalary = basicSalary; Allowances = allowances; CompensationSnapshotId = compensationSnapshotId;
-        Status = AccountingValues.PayrollStatuses.Draft; CreatedAt = createdAt; RecalculateNet();
+        Status = AccountingValues.PayrollStatuses.Draft; CreatedAt = createdAt; EmployeePayrollStatus = NormalizeEmployeePayrollStatus(employeePayrollStatus); RecalculateNet();
     }
 
     public Guid Id { get; private set; }
@@ -77,6 +78,11 @@ public sealed class AccountingEmployeePayroll
     public decimal NetSalary { get; private set; }
     public string Status { get; private set; } = AccountingValues.PayrollStatuses.Draft;
     public string? Notes { get; private set; }
+    public string EmployeePayrollStatus { get; private set; } = AccountingValues.EmployeePayrollStatuses.Active;
+    public string? EmployeePayrollStatusReason { get; private set; }
+    public Guid? EmployeePayrollStatusChangedByUserId { get; private set; }
+    public User? EmployeePayrollStatusChangedByUser { get; private set; }
+    public DateTimeOffset? EmployeePayrollStatusChangedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -99,6 +105,31 @@ public sealed class AccountingEmployeePayroll
         OtherAdjustments += adjustments; Notes = NullIfEmpty(notes); UpdatedAt = now; RecalculateNet();
     }
 
+    public void ChangeEmployeePayrollStatus(string status, string? reason, Guid changedByUserId, DateTimeOffset changedAt)
+    {
+        if (Status is AccountingValues.PayrollStatuses.Paid or AccountingValues.PayrollStatuses.Cancelled or "DELETED")
+            throw new InvalidOperationException("Employee payroll status cannot be changed after payment or cancellation.");
+        if (changedByUserId == Guid.Empty) throw new ArgumentException("Changing user is required.", nameof(changedByUserId));
+        if (changedAt == default) throw new ArgumentException("Change timestamp is required.", nameof(changedAt));
+        EmployeePayrollStatus = NormalizeEmployeePayrollStatus(status);
+        EmployeePayrollStatusReason = NullIfEmpty(reason);
+        EmployeePayrollStatusChangedByUserId = changedByUserId;
+        EmployeePayrollStatusChangedAt = changedAt;
+        UpdatedAt = changedAt;
+    }
+
+    public bool IsPaymentEligible(DateOnly periodStart, DateOnly? terminationDate)
+    {
+        if (Status is AccountingValues.PayrollStatuses.Cancelled or "DELETED"
+            || terminationDate.HasValue && terminationDate.Value < periodStart)
+            return false;
+        if (EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Suspended)
+            return false;
+        if (EmployeePayrollStatus == AccountingValues.EmployeePayrollStatuses.Terminated)
+            return terminationDate.HasValue && terminationDate.Value >= periodStart;
+        return EmployeePayrollStatus is AccountingValues.EmployeePayrollStatuses.Active or AccountingValues.EmployeePayrollStatuses.UnpaidLeave;
+    }
+
     private void RecalculateNet() => NetSalary = BasicSalary + Allowances + Transportation + Commissions + Bonuses + OtherAdjustments - Deductions;
     public void DeleteAfterConfirmation(DateTimeOffset now) { Status = "DELETED"; UpdatedAt = now; }
     private void EnsureEditable()
@@ -107,6 +138,14 @@ public sealed class AccountingEmployeePayroll
             throw new InvalidOperationException("Approved or paid payroll cannot be silently edited.");
     }
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string NormalizeEmployeePayrollStatus(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        var normalized = value.Trim().ToUpperInvariant();
+        if (!AccountingValues.EmployeePayrollStatuses.All.Contains(normalized, StringComparer.Ordinal))
+            throw new ArgumentException("Invalid employee payroll status.", nameof(value));
+        return normalized;
+    }
 }
 
 public sealed class AccountingTransportationClaim

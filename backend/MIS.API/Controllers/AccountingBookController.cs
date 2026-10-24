@@ -26,7 +26,9 @@ public sealed class AccountingBookController(IAccountingBookService service) : C
     [HttpGet("summary")]
     public Task<AccountingBookSummaryDto> Summary([FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken token) => service.SummaryAsync(from, to, token);
     [HttpGet("advances")]
-    public Task<IReadOnlyList<AccountingAdvanceDto>> Advances([FromQuery] DateOnly asOf, [FromQuery] string? search, [FromQuery] Guid? employeeId, CancellationToken token) => service.AdvancesAsync(asOf, search, employeeId, token);
+    public Task<AccountingAdvancesResultDto> Advances([FromQuery] AccountingAdvancesFilter filter, CancellationToken token) => service.AdvancesAsync(filter, token);
+    [HttpGet("advances/{id:guid}")]
+    public Task<AccountingAdvanceDetailsDto> AdvanceDetails(Guid id, CancellationToken token) => service.AdvanceDetailsAsync(id, token);
     [HttpGet("recurring")]
     public Task<IReadOnlyList<AccountingRecurringExpenseDto>> Recurring(CancellationToken token) => service.RecurringAsync(token);
     [HttpPost("recurring")]

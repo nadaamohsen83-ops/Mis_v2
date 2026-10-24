@@ -65,6 +65,7 @@ public static class DependencyInjection
         services.AddScoped<IBankCustomerImportService, BankCustomerImportService>();
         services.AddScoped<IDataEntryService, DataEntryService>();
         services.AddScoped<ILegalService, LegalService>();
+        services.AddScoped<ILegalCaseImportService, LegalCaseImportService>();
         services.AddScoped<IBankCaseDistributionService, BankCaseDistributionService>();
         services.AddScoped<IBankDistributionImportService, BankDistributionImportService>();
         services.AddScoped<IBankCaseActivityService, BankCaseActivityService>();

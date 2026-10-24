@@ -6,7 +6,7 @@ import { useAccountingText } from '../../features/accounting/accountingUi';
 const reports = [
   ['summary', 'إجمالي المصاريف والوارد', 'Income and expense summary', 'الإيرادات والمصروفات والتدفق النقدي وتفصيل البنود', 'Income, expense, cash flow and category breakdown'],
   ['cashbook', 'سجل المصاريف والوارد', 'Accounting register', 'المستندات والحسابات والموظفون وحالة كل حركة', 'Documents, accounts, employees and entry statuses'],
-  ['advances', 'السلف والسلف المرحلة', 'Advances and carried balances', 'أصل السلفة والمسدد والمتبقي حتى نهاية الفترة', 'Original advances, repayments and balances as of the end date'],
+  ['advances', 'السلف والتسويات', 'Advances and settlements', 'أصل السلفة والمسدد والمتبقي حتى نهاية الفترة', 'Original advances, repayments and balances as of the end date'],
   ['recurring', 'قوالب المصاريف الشهرية', 'Recurring expense templates', 'المبالغ والاستحقاق وفترة التكرار والحالة', 'Amounts, due days, schedule and status'],
   ['salaries', 'المرتبات', 'Salaries', 'الأساسي والبدلات والعمولات والمكافآت والخصومات والصافي', 'Basic salary, allowances, commissions, bonuses, deductions and net pay'],
   ['transportation', 'الانتقالات', 'Transportation', 'الموظف والمطالبة والمبلغ وحالة الصرف', 'Employee claims, amounts and payment status'],
