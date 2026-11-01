@@ -10,7 +10,7 @@ using MIS.Infrastructure.Persistence;
 
 namespace MIS.Infrastructure.Services;
 
-public sealed class BankVisitService(ApplicationDbContext db, ICurrentUserContext user, ICollectionsClassificationContext classification) : IBankVisitService
+public sealed partial class BankVisitService(ApplicationDbContext db, ICurrentUserContext user, ICollectionsClassificationContext classification, IHrFileStorage storage, IWorkingCalendarCalculator calendar) : IBankVisitService
 {
     private static readonly string[] ActiveStatuses = [CollectionsValues.VisitStatuses.Scheduled, CollectionsValues.VisitStatuses.Assigned, CollectionsValues.VisitStatuses.Planned, CollectionsValues.VisitStatuses.InProgress, CollectionsValues.VisitStatuses.Rescheduled];
     private static readonly HashSet<string> Results = new(StringComparer.OrdinalIgnoreCase) { CollectionsValues.VisitResults.CustomerMet, CollectionsValues.VisitResults.CustomerNotAvailable, CollectionsValues.VisitResults.AddressNotFound, CollectionsValues.VisitResults.WrongAddress, CollectionsValues.VisitResults.RefusedContact, CollectionsValues.VisitResults.PromiseToPayDiscussed, CollectionsValues.VisitResults.FollowUpRequired, CollectionsValues.VisitResults.Other };

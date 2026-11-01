@@ -50,6 +50,31 @@ internal static class HrImportWorkbookBuilder
         return Save(workbook);
     }
 
+    public static byte[] BuildExcuse()
+    {
+        using var workbook = new XLWorkbook();
+        var sheet = AddSheet(workbook, "Excuses",
+            "Employee Number", "Excuse Type", "Date", "From Time", "To Time", "Notes");
+        sheet.Cell(2, 1).Value = "EMP-1001";
+        sheet.Cell(2, 2).Value = "إذن شخصي";
+        sheet.Cell(2, 3).Value = "2026-10-03";
+        sheet.Cell(2, 4).Value = new TimeSpan(9, 0, 0);
+        sheet.Cell(2, 5).Value = new TimeSpan(11, 0, 0);
+        sheet.Cell(2, 6).Value = "مراجعة جهة حكومية";
+        sheet.Range("C2:C2001").Style.NumberFormat.Format = "@";
+        sheet.Range("D2:E2001").Style.NumberFormat.Format = "hh:mm";
+        sheet.Column(2).Width = 24;
+        sheet.Column(6).Width = 36;
+        AddInstructions(workbook,
+            ("How to use", "طريقة الاستخدام"),
+            ("Enter one excuse per row. Do not rename the headers. The example row can be replaced.", "أدخل عذرًا واحدًا في كل صف ولا تغيّر أسماء الأعمدة. يمكن استبدال صف المثال."),
+            ("Employees are matched only by Employee Number. New employees are not created.", "المطابقة برقم الموظف فقط. لن يُنشأ موظف جديد."),
+            ("Excuse Type must already exist: PersonalExcuse, MedicalExcuse, OfficialMission, LateArrivalExcuse, EarlyLeaveExcuse, Other, or the Arabic name.", "نوع العذر يجب أن يكون موجودًا: إذن شخصي، عذر طبي، مأمورية عمل، عذر تأخير، عذر انصراف مبكر، أخرى، أو الكود الإنجليزي."),
+            ("Date: type DD/MM/YYYY or yyyy-mm-dd. The column is text so Excel keeps the calendar day you type. Leave both times empty for a full day, or enter both with To Time after From Time.", "التاريخ: اكتب DD/MM/YYYY أو yyyy-mm-dd. العمود نصي حتى يحتفظ Excel باليوم الذي تكتبه. اترك الوقتين فارغين ليوم كامل، أو أدخلهما معًا بحيث تكون النهاية بعد البداية."),
+            ("Notes are required and are saved as the excuse reason. Imported rows stay pending approval.", "الملاحظات إلزامية وتُحفظ كسبب العذر. الصفوف المستوردة تبقى بانتظار الموافقة."));
+        return Save(workbook);
+    }
+
     public static byte[] BuildAttendance()
     {
         using var workbook = new XLWorkbook();

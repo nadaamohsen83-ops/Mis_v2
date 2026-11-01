@@ -58,13 +58,15 @@ export function BankCustomerDetailsPage() {
           <Field label={ct('alternativeMobile')} value={data.alternativeMobile} />
           <Field label={ct('nationalId')} value={data.nationalId} />
           <Field label={ct('customerCode')} value={data.customerCode} />
-          <Field label={ct('accountContract')} value={data.cases[0]?.accountReference ?? data.importAccountNumber ?? data.cases[0]?.contractReference ?? data.importContractNumber} />
+          <Field label={ct('accountContract')} value={data.cases[0]?.accountReference ?? data.dataEntryRecords[0]?.accountNumber ?? data.importAccountNumber ?? data.cases[0]?.contractReference ?? data.dataEntryRecords[0]?.contractNumber ?? data.importContractNumber} />
           <Field label={ct('address1')} value={addresses.address1} wide />
           <Field label={ct('secondaryAddress')} value={addresses.address2} wide />
+          <Field label={ct('feedback')} value={data.feedback} wide />
+          <Field label={ct('notes')} value={data.notes} wide />
         </div>
       </Card>
 
-      {data.importBatchNumber || data.importFileName || data.importedFields || data.importNotes || data.importFeedback ? (
+      {data.importBatchNumber || data.importBatchStatus || data.importedAt || data.importFileName || data.importedCustomerName || data.importedNationalId || data.importedMobileNumber || data.importedAddress || data.importAccountNumber || data.importContractNumber || data.importedPhones?.length || data.importedFields || data.importNotes || data.importFeedback ? (
         <Card title={ct('importInformation')}>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <Field label={ct('portfolio')} value={data.portfolioName} />
@@ -82,6 +84,28 @@ export function BankCustomerDetailsPage() {
             <Field label={ct('importedFeedback')} value={data.importFeedback} wide />
             <Field label={ct('importedNotes')} value={data.importNotes} wide />
             {Object.entries(data.importedFields ?? {}).map(([name, value]) => <Field key={name} label={name} value={value} />)}
+          </div>
+        </Card>
+      ) : null}
+
+      {data.dataEntryRecords.length ? (
+        <Card title={ct('importCustomersTitle')}>
+          <div className="space-y-4">
+            {data.dataEntryRecords.map((record) => (
+              <section className="border-b border-mis-border pb-4 last:border-0 last:pb-0" key={`${record.batchNumber}-${record.accountNumber ?? ''}`}>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  <Field label={ct('importBatch')} value={record.batchNumber} />
+                  <Field label={ct('importStatus')} value={record.batchStatus} />
+                  <Field label={ct('portfolio')} value={record.portfolioName} />
+                  <Field label={ct('accountNumber')} value={record.accountNumber} />
+                  <Field label={ct('accountContract')} value={record.contractNumber} />
+                  <Field label={ct('feedback')} value={record.feedback} />
+                  <Field label={ct('notes')} value={record.notes} />
+                  <Field label={ct('mobile')} value={record.phones.join(' · ')} />
+                  {Object.entries(record.fields).map(([label, value]) => <Field key={label} label={label} value={value} />)}
+                </div>
+              </section>
+            ))}
           </div>
         </Card>
       ) : null}

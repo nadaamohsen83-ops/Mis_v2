@@ -20,6 +20,7 @@ import { FileInput } from '../../components/forms/FileInput';
 import { Checkbox } from '../../components/forms/Checkbox';
 import { useCollectionsLocalization } from '../../features/collections/localization/collectionsTranslations';
 import { EmployeeSearchSelect } from '../../features/hr/components/EmployeeSearchSelect';
+import { ExcuseImportModal } from '../../features/hr/components/ExcuseImportModal';
 import { hrEmployeeService } from '../../features/hr/services/hrEmployeeService';
 import {
   formatExcuseTime,
@@ -36,6 +37,7 @@ const words = {
   en: {
     title: 'Excuses & Field Duties',
     add: '+ Add Manual Excuse',
+    importExcel: 'Upload Excel',
     pending: 'Pending Visit Approvals',
     searchPlaceholder: 'Search by employee name or mobile number...',
     employee: 'Employee',
@@ -110,6 +112,7 @@ const words = {
   ar: {
     title: 'الأعذار والمأموريات',
     add: '+ إضافة عذر يدوي',
+    importExcel: 'رفع ملف Excel',
     pending: 'زيارات تحتاج موافقة',
     searchPlaceholder: 'ابحث باسم الموظف أو رقم الموبايل...',
     employee: 'الموظف',
@@ -215,6 +218,7 @@ export function HrExcusesPage({ employeeId: profileEmployeeId }: { employeeId?: 
   const version = useRef(0);
   const [item, setItem] = useState<ExcuseItem>();
   const [creating, setCreating] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(blank());
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeListItem | null>(null);
@@ -454,19 +458,24 @@ export function HrExcusesPage({ employeeId: profileEmployeeId }: { employeeId?: 
   const toolbar = (
     <>
       {data?.canManage ? (
-        <Button
-          fullWidth={false}
-          onClick={() => {
-            setForm({ ...blank(), employeeId: profileEmployeeId || '' });
-            setFile(undefined);
-            setFormError('');
-            setEditing(false);
-            setItem(undefined);
-            setCreating(true);
-          }}
-        >
-          {w.add}
-        </Button>
+        <>
+          <Button
+            fullWidth={false}
+            onClick={() => {
+              setForm({ ...blank(), employeeId: profileEmployeeId || '' });
+              setFile(undefined);
+              setFormError('');
+              setEditing(false);
+              setItem(undefined);
+              setCreating(true);
+            }}
+          >
+            {w.add}
+          </Button>
+          <Button fullWidth={false} variant="secondary" onClick={() => setImportOpen(true)} type="button">
+            {w.importExcel}
+          </Button>
+        </>
       ) : null}
       <button
         type="button"
@@ -570,6 +579,7 @@ export function HrExcusesPage({ employeeId: profileEmployeeId }: { employeeId?: 
         )
       )}
 
+      <ExcuseImportModal open={importOpen} onClose={() => setImportOpen(false)} onCompleted={() => void load()} />
       <Modal open={creating || !!item} onClose={() => { if (!busy) closeReview(); }} title={creating ? (editing ? w.edit : w.add) : w.review} size="lg">
         {formError ? <FormError message={formError} /> : null}
 

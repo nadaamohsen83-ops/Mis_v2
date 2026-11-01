@@ -67,6 +67,8 @@ public sealed record BankCustomerDetailsDto(
     string? SecondaryAddress,
     string? Governorate,
     string? Area,
+    string? Feedback,
+    string? Notes,
     string OrganizationName,
     string OrganizationType,
     decimal TotalOriginalAmount,
@@ -81,6 +83,7 @@ public sealed record BankCustomerDetailsDto(
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Complaints,
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Activities,
     IReadOnlyCollection<BankCustomerLinkSummaryDto> Timeline,
+    IReadOnlyCollection<BankCustomerDataEntryRecordDto> DataEntryRecords,
     string? PortfolioName = null,
     string? ProductType = null,
     string? ImportFileName = null,
@@ -97,3 +100,14 @@ public sealed record BankCustomerDetailsDto(
     string? ImportNotes = null,
     IReadOnlyList<string>? ImportedPhones = null,
     IReadOnlyDictionary<string, string>? ImportedFields = null);
+
+public sealed record BankCustomerDataEntryRecordDto(
+    string BatchNumber,
+    string BatchStatus,
+    string PortfolioName,
+    string? AccountNumber,
+    string? ContractNumber,
+    string? Feedback,
+    string? Notes,
+    IReadOnlyList<string> Phones,
+    IReadOnlyDictionary<string, string> Fields);

@@ -39,10 +39,84 @@ export function scoreAliasMatch(column: string, alias: string): number {
     if (` ${normalizedColumn} `.includes(` ${normalizedAlias} `)) return 70 + normalizedAlias.length;
     if (compactColumn.startsWith(compactAlias) || compactColumn.endsWith(compactAlias)) return 60 + normalizedAlias.length;
   }
-  if (aliasWords.length === 1 && (compactColumn.includes(compactAlias) || compactAlias.includes(compactColumn)) && compactAlias.length >= 4) {
+  if (aliasWords.length === 1 && compactColumn.includes(compactAlias) && compactAlias.length >= 4) {
     return 35 + Math.min(compactAlias.length, compactColumn.length);
   }
   return 0;
+}
+
+const excuseRejectedHeaders = new Set(['leave type', 'start date', 'end date', 'reason', 'status', 'نوع الإجازة', 'نوع الاجازة', 'تاريخ البداية', 'تاريخ النهاية', 'السبب', 'الحالة']);
+
+export function isExcuseRejectedHeader(column: string): boolean {
+  return excuseRejectedHeaders.has(normalizeImportHeader(column));
+}
+
+function scoreExcuseAlias(column: string, alias: string): number {
+  if (isExcuseRejectedHeader(column)) return 0;
+  const normalizedColumn = normalizeImportHeader(column);
+  const normalizedAlias = normalizeImportHeader(alias);
+  if (!normalizedColumn || !normalizedAlias) return 0;
+  if (normalizedColumn === normalizedAlias) return 100 + normalizedAlias.length;
+  const compactColumn = compactImportHeader(column);
+  const compactAlias = compactImportHeader(alias);
+  if (compactColumn && compactColumn === compactAlias) return 90 + normalizedAlias.length;
+  const aliasWords = normalizedAlias.split(' ').filter(Boolean);
+  if (aliasWords.length >= 2 && ` ${normalizedColumn} `.includes(` ${normalizedAlias} `)) return 70 + normalizedAlias.length;
+  return 0;
+}
+
+export function autoMapExcuseImportColumns(fields: readonly ImportFieldDef[], detectedColumns: readonly string[]): Record<string, string> {
+  const columns: Record<string, string> = Object.fromEntries(fields.map((field) => [field.key, '']));
+  const claimed = new Set<string>();
+  for (const field of fields) {
+    let bestColumn = '';
+    let bestScore = 0;
+    for (const column of detectedColumns) {
+      if (claimed.has(column) || !column?.trim() || isExcuseRejectedHeader(column)) continue;
+      for (const alias of [field.en, field.ar, ...field.aliases]) {
+        const score = scoreExcuseAlias(column, alias);
+        if (score > bestScore) {
+          bestScore = score;
+          bestColumn = column;
+        }
+      }
+    }
+    if (bestColumn) {
+      columns[field.key] = bestColumn;
+      claimed.add(bestColumn);
+    }
+  }
+  return columns;
+}
+
+export function autoMapVisitImportColumns(fields: readonly ImportFieldDef[], detectedColumns: readonly string[]): Record<string, string> {
+  const columns: Record<string, string> = Object.fromEntries(fields.map((field) => [field.key, '']));
+  const claimed = new Set<string>();
+  for (const field of fields) {
+    let bestColumn = '';
+    let bestScore = 0;
+    for (const column of detectedColumns) {
+      if (claimed.has(column) || !column?.trim()) continue;
+      for (const alias of [field.en, field.ar, ...field.aliases]) {
+        const normalizedColumn = normalizeImportHeader(column);
+        const normalizedAlias = normalizeImportHeader(alias);
+        if (!normalizedColumn || !normalizedAlias) continue;
+        let score = 0;
+        if (normalizedColumn === normalizedAlias) score = 100 + normalizedAlias.length;
+        else if (compactImportHeader(column) === compactImportHeader(alias)) score = 90 + normalizedAlias.length;
+        else if (normalizedAlias.split(' ').filter(Boolean).length >= 2 && ` ${normalizedColumn} `.includes(` ${normalizedAlias} `)) score = 70 + normalizedAlias.length;
+        if (score > bestScore) {
+          bestScore = score;
+          bestColumn = column;
+        }
+      }
+    }
+    if (bestColumn) {
+      columns[field.key] = bestColumn;
+      claimed.add(bestColumn);
+    }
+  }
+  return columns;
 }
 
 export function autoMapImportColumns(fields: readonly ImportFieldDef[], detectedColumns: readonly string[]): Record<string, string> {
