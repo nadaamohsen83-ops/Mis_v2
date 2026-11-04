@@ -28,6 +28,7 @@ export function LegalDashboardPage() {
     return <div className="grid min-h-[440px] place-items-center"><LoadingSpinner /></div>;
   }
 
+  const recentlyAdded = data.recentlyAdded ?? [];
   const metrics = [
     { label: l.text('إجمالي العملاء القانونيين', 'Total Legal Clients'), value: data.totalClients, icon: UsersRound, tone: 'blue' as const, to: '/legal/clients' },
     { label: l.text('العملاء المضافون مؤخرًا', 'Recently Added Clients'), value: data.recentlyAddedClients, icon: UserRoundPlus, tone: 'green' as const, to: '/legal/clients' },
@@ -62,7 +63,7 @@ export function LegalDashboardPage() {
             {l.text('كل العملاء', 'All Clients')} <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
-        {data.recentlyAdded.length ? (
+        {recentlyAdded.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[46rem] text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -75,7 +76,7 @@ export function LegalDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-mis-border">
-                {data.recentlyAdded.map((client) => (
+                {recentlyAdded.map((client) => (
                   <tr className="hover:bg-slate-50" key={client.customerId}>
                     <td className="px-4 py-3 font-semibold text-mis-navy">{client.name}</td>
                     <td className="px-4 py-3" data-bidi="ltr">{client.nationalId || '—'}</td>

@@ -19,8 +19,26 @@ import type {
 } from '../types/legal';
 
 export const legalService = {
-  async dashboard() {
-    return (await apiClient.get<LegalDashboard>('/legal/dashboard')).data;
+  async dashboard(): Promise<LegalDashboard> {
+    const response = (await apiClient.get<(Omit<LegalDashboard, 'recentlyAdded'> & {
+      recentlyAdded?: LegalDashboard['recentlyAdded'] | null;
+    }) | null>('/legal/dashboard')).data;
+
+    if (
+      !response
+      || typeof response.totalClients !== 'number'
+      || typeof response.recentlyAddedClients !== 'number'
+      || typeof response.transferredFromCollections !== 'number'
+      || typeof response.recentlyUpdatedClientFiles !== 'number'
+      || typeof response.canManage !== 'boolean'
+    ) {
+      throw new Error('Invalid Legal dashboard response.');
+    }
+
+    return {
+      ...response,
+      recentlyAdded: Array.isArray(response.recentlyAdded) ? response.recentlyAdded : [],
+    };
   },
 
   async organizations() {
