@@ -18,6 +18,7 @@ public interface IFinanceService
     Task<JournalDto> ApproveJournalAsync(Guid id, CancellationToken token);
     Task<JournalDto> PostJournalAsync(Guid id, CancellationToken token);
     Task<JournalDto> ReverseJournalAsync(Guid id, PeriodActionRequest request, CancellationToken token);
+    Task<JournalDto> ReverseClaimReceiptAsync(Guid id, PeriodActionRequest request, CancellationToken token);
     Task<ClientLedgerDto> GetClientLedgerAsync(Guid clientId, DateOnly? from, DateOnly? to, CancellationToken token);
     Task<TrialBalanceDto> GetTrialBalanceAsync(DateOnly asOf, CancellationToken token);
     Task<FinancePagedResultDto<FinancialAuditDto>> GetAuditAsync(int page, int pageSize, CancellationToken token);

@@ -1,0 +1,565 @@
+using System.Data;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using MIS.Application.Common;
+using MIS.Application.DTOs.Hr;
+using MIS.Application.DTOs.Legal;
+using MIS.Application.Interfaces;
+using MIS.Domain.Constants;
+using MIS.Domain.Entities;
+using MIS.Infrastructure.Persistence;
+
+namespace MIS.Infrastructure.Services;
+
+public sealed class LegalClientService(
+    ApplicationDbContext db,
+    ICurrentUserContext user,
+    IHrFileStorage files) : ILegalClientService
+{
+    private const int MaximumImportRows = 5_000;
+    private const long MaximumDocumentBytes = 10 * 1024 * 1024;
+    private static readonly string[] ClientStatuses = ["ACTIVE", "LEGAL", "ON_HOLD", "CLOSED"];
+
+    private sealed record EvaluatedRow(
+        LegalClientImportSourceRow Source,
+        string Status,
+        ClientOrganization? Organization,
+        CollectionCustomer? Customer,
+        IReadOnlyCollection<string> Errors);
+
+    public async Task<LegalClientDashboardDto> GetDashboardAsync(CancellationToken token)
+    {
+        var clients = LegalClients();
+        var since = DateTimeOffset.UtcNow.AddDays(-30);
+        var total = await clients.CountAsync(token);
+        var recentAdded = await clients.CountAsync(customer =>
+            customer.CreatedAt >= since
+            || db.LegalClientAssignments.Any(x => x.CustomerId == customer.Id && x.CreatedAt >= since)
+            || db.LegalCaseFiles.Any(x => x.CollectionCase.CustomerId == customer.Id && x.ReceivedAt >= since)
+            || db.CollectionCases.Any(x => x.CustomerId == customer.Id && x.Status == CollectionsValues.CaseStatuses.Legal
+                && !x.IsArchived && x.UpdatedAt >= since), token);
+        var transferred = await db.CollectionCases.AsNoTracking()
+            .Where(x => !x.IsArchived && x.Status == CollectionsValues.CaseStatuses.Legal)
+            .Select(x => x.CustomerId).Distinct().CountAsync(token);
+        var updatedFiles = await clients.CountAsync(customer =>
+            db.LegalClientAssignments.Any(x => x.CustomerId == customer.Id && x.UpdatedAt >= since)
+            || db.LegalCaseFiles.Any(x => x.CollectionCase.CustomerId == customer.Id && x.UpdatedAt >= since)
+            || db.LegalClientDocuments.Any(x => x.CustomerId == customer.Id && x.UploadedAt >= since), token);
+        var recent = await clients
+            .Where(customer => customer.CreatedAt >= since
+                || db.LegalClientAssignments.Any(x => x.CustomerId == customer.Id && x.CreatedAt >= since)
+                || db.LegalCaseFiles.Any(x => x.CollectionCase.CustomerId == customer.Id && x.ReceivedAt >= since)
+                || db.CollectionCases.Any(x => x.CustomerId == customer.Id && x.Status == CollectionsValues.CaseStatuses.Legal
+                    && !x.IsArchived && x.UpdatedAt >= since))
+            .OrderByDescending(customer =>
+                db.LegalClientAssignments.Where(x => x.CustomerId == customer.Id).Select(x => (DateTimeOffset?)x.CreatedAt).FirstOrDefault()
+                ?? db.LegalCaseFiles.Where(x => x.CollectionCase.CustomerId == customer.Id)
+                    .Select(x => (DateTimeOffset?)x.ReceivedAt).FirstOrDefault()
+                ?? customer.CreatedAt)
+            .Take(8)
+            .Select(ClientProjection())
+            .ToArrayAsync(token);
+
+        return new LegalClientDashboardDto(total, recentAdded, transferred, updatedFiles, recent, CanManage());
+    }
+
+    public async Task<LegalClientPageDto> ListAsync(string? search, int page, int pageSize, CancellationToken token)
+    {
+        if (page < 1) page = 1;
+        if (pageSize is not (20 or 50 or 100)) pageSize = 20;
+
+        var query = LegalClients();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            if (term.Length > 160) throw new HrValidationException("Search cannot exceed 160 characters.");
+            query = query.Where(customer =>
+                (customer.FullNameArabic != null && customer.FullNameArabic.ToLower().Contains(term))
+                || (customer.FullNameEnglish != null && customer.FullNameEnglish.ToLower().Contains(term))
+                || customer.CustomerCode.ToLower().Contains(term)
+                || (customer.NationalId != null && customer.NationalId.ToLower().Contains(term))
+                || (customer.PrimaryPhone != null && customer.PrimaryPhone.ToLower().Contains(term)));
+        }
+
+        var count = await query.CountAsync(token);
+        var items = await query.OrderBy(customer => ApiTextLocalizer.IsArabic
+                ? customer.FullNameArabic ?? customer.FullNameEnglish
+                : customer.FullNameEnglish ?? customer.FullNameArabic)
+            .ThenBy(customer => customer.CustomerCode)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(ClientProjection())
+            .ToArrayAsync(token);
+        return new LegalClientPageDto(items, page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize));
+    }
+
+    public async Task<LegalClientDetailsDto> GetAsync(Guid customerId, CancellationToken token)
+    {
+        var customer = await LegalClients().Include(x => x.Organization).Include(x => x.CreatedByUser)
+            .SingleOrDefaultAsync(x => x.Id == customerId, token)
+            ?? throw new HrNotFoundException("Legal client was not found.");
+        return await MapDetailsAsync(customer, token);
+    }
+
+    public async Task<LegalClientDetailsDto> UpdateAsync(Guid customerId, UpdateLegalClientRequest request, CancellationToken token)
+    {
+        RequireManage();
+        var customer = await LegalClients().Include(x => x.Organization).Include(x => x.CreatedByUser)
+            .SingleOrDefaultAsync(x => x.Id == customerId, token)
+            ?? throw new HrNotFoundException("Legal client was not found.");
+        if (request.Status is not null && !ClientStatuses.Contains(request.Status.Trim().ToUpperInvariant()))
+            throw new HrValidationException("Client status is invalid.");
+        if (request.Notes?.Length > 2000) throw new HrValidationException("Notes cannot exceed 2,000 characters.");
+
+        var now = DateTimeOffset.UtcNow;
+        var assignment = await db.LegalClientAssignments.SingleOrDefaultAsync(x => x.CustomerId == customerId, token);
+        var before = assignment is null ? null : new { assignment.Status, assignment.Notes };
+        if (assignment is null)
+        {
+            assignment = new LegalClientAssignment(customerId, user.UserId, now);
+            db.LegalClientAssignments.Add(assignment);
+        }
+        var status = request.Status ?? (await HasLegalCaseAsync(customerId, token) ? "LEGAL" : assignment.Status);
+        assignment.Update(status, request.Notes, user.UserId, now);
+        AddAudit("LegalClientUpdated", customerId, before, request);
+        await db.SaveChangesAsync(token);
+        return await MapDetailsAsync(customer, token);
+    }
+
+    public async Task<LegalClientImportPreviewDto> PreviewImportAsync(string fileName, long length, Stream content, CancellationToken token)
+    {
+        RequireManage();
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        if (length is <= 0 or > ExcelImportLimits.MaximumBytes) throw new HrValidationException(ExcelImportLimits.SizeMessage);
+        if (extension is not (".xlsx" or ".xls" or ".csv"))
+            throw new HrValidationException("Only XLSX, XLS, and CSV client files are supported.");
+
+        var parsed = await CollectionImportParser.ParseAsync(content, extension, token);
+        if (parsed.Count > MaximumImportRows)
+            throw new HrValidationException($"Client imports cannot exceed {MaximumImportRows:N0} rows.");
+
+        var rowOffset = extension == ".csv" ? 0 : 1;
+        var sources = parsed.Select(row => MapImportRow(row, rowOffset)).ToArray();
+        var evaluated = await EvaluateRowsAsync(sources, token);
+        var previewRows = evaluated.Select(row => new LegalClientImportPreviewRowDto(
+            row.Source, row.Status, LocalizedCustomerName(row.Customer), row.Errors)).ToArray();
+        var valid = previewRows.Count(row => row.Status is "VALID" or "EXISTING");
+        return new LegalClientImportPreviewDto(
+            SafeFileName(fileName),
+            previewRows.Length,
+            valid,
+            previewRows.Length - valid,
+            evaluated.Where(row => row.Customer is not null).Select(row => row.Customer!.Id).Distinct().Count(),
+            previewRows.Count(row => row.Status == "DUPLICATE"),
+            previewRows);
+    }
+
+    public async Task<LegalClientImportResultDto> ImportAsync(LegalClientImportRequest request, CancellationToken token)
+    {
+        RequireManage();
+        if (request.Rows is null || request.Rows.Count == 0)
+            throw new HrValidationException("The import request must contain previewed client rows.");
+        if (request.Rows.Count > MaximumImportRows)
+            throw new HrValidationException($"Client imports cannot exceed {MaximumImportRows:N0} rows.");
+        if (request.Rows.Select(row => row.RowNumber).Distinct().Count() != request.Rows.Count
+            || request.Rows.Any(row => row.RowNumber < 2))
+            throw new HrValidationException("Import row numbers must be unique and start at row 2 or later.");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+        var evaluated = await EvaluateRowsAsync(request.Rows, token);
+        var results = new List<LegalClientImportRowResultDto>(evaluated.Count);
+        var succeeded = 0;
+        foreach (var row in evaluated)
+        {
+            if (row.Status is not ("VALID" or "EXISTING") || row.Organization is null)
+            {
+                results.Add(new LegalClientImportRowResultDto(row.Source.RowNumber, row.Status, row.Errors));
+                continue;
+            }
+
+            var customer = row.Customer ?? CreateCustomer(row);
+            if (row.Customer is null)
+            {
+                db.CollectionCustomers.Add(customer);
+            }
+            else
+            {
+                var (nameArabic, nameEnglish) = ImportNames(row.Source);
+                var (addressArabic, addressEnglish) = ImportAddresses(row.Source);
+                customer.FillMissingLegalImportDetails(
+                    nameArabic,
+                    nameEnglish,
+                    Normalize(row.Source.NationalId),
+                    Normalize(row.Source.MobileNumber),
+                    addressArabic,
+                    addressEnglish);
+            }
+            var now = DateTimeOffset.UtcNow;
+            var assignment = new LegalClientAssignment(customer.Id, user.UserId, now);
+            if (!string.IsNullOrWhiteSpace(row.Source.Notes))
+                assignment.Update("ACTIVE", row.Source.Notes, user.UserId, now);
+            db.LegalClientAssignments.Add(assignment);
+            AddAudit("LegalClientImported", customer.Id, null, new { request.FileName, row.Source.RowNumber });
+            results.Add(new LegalClientImportRowResultDto(row.Source.RowNumber, "IMPORTED", []));
+            succeeded++;
+        }
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
+        return new LegalClientImportResultDto(results.Count, succeeded, results.Count - succeeded, results);
+    }
+
+    public async Task<LegalClientDocumentDto> UploadDocumentAsync(
+        Guid customerId,
+        string fileName,
+        string contentType,
+        long length,
+        Stream content,
+        CancellationToken token)
+    {
+        RequireManage();
+        await EnsureLegalClientAsync(customerId, token);
+        if (length is <= 0 or > MaximumDocumentBytes)
+            throw new HrValidationException("Documents must be between 1 byte and 10 MB.");
+
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        var detectedType = await ValidateDocumentContentAsync(content, extension, token);
+        var stored = await files.SaveAsync("legal-client-documents", fileName, detectedType, content, MaximumDocumentBytes, token);
+        var document = new LegalClientDocument(customerId, stored.OriginalFileName, stored.ContentType, stored.Length,
+            stored.Sha256Hash, stored.StorageKey, user.UserId, DateTimeOffset.UtcNow);
+        db.LegalClientDocuments.Add(document);
+        AddAudit("LegalClientDocumentUploaded", customerId, null, new { document.OriginalFileName, document.ContentType, document.FileSize });
+        try
+        {
+            await db.SaveChangesAsync(token);
+        }
+        catch
+        {
+            await files.DeleteAsync(stored.StorageKey, token);
+            throw;
+        }
+        return await ProjectDocument(db.LegalClientDocuments.AsNoTracking().Where(x => x.Id == document.Id)).SingleAsync(token);
+    }
+
+    public async Task<LegalClientDocumentDownloadDto> DownloadDocumentAsync(Guid documentId, CancellationToken token)
+    {
+        var document = await db.LegalClientDocuments.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == documentId, token)
+            ?? throw new HrNotFoundException("Legal client document was not found.");
+        await EnsureLegalClientAsync(document.CustomerId, token);
+        var stream = await files.OpenReadAsync(document.StorageKey, token);
+        AddAudit("LegalClientDocumentDownloaded", document.CustomerId, null, new { document.OriginalFileName });
+        await db.SaveChangesAsync(token);
+        return new LegalClientDocumentDownloadDto(stream, document.ContentType, document.OriginalFileName);
+    }
+
+    public async Task DeleteDocumentAsync(Guid documentId, CancellationToken token)
+    {
+        RequireManage();
+        var document = await db.LegalClientDocuments.SingleOrDefaultAsync(x => x.Id == documentId, token)
+            ?? throw new HrNotFoundException("Legal client document was not found.");
+        await EnsureLegalClientAsync(document.CustomerId, token);
+        await files.DeleteAsync(document.StorageKey, token);
+        db.LegalClientDocuments.Remove(document);
+        AddAudit("LegalClientDocumentDeleted", document.CustomerId,
+            new { document.OriginalFileName, document.ContentType, document.FileSize }, null);
+        await db.SaveChangesAsync(token);
+    }
+
+    private IQueryable<CollectionCustomer> LegalClients() =>
+        db.CollectionCustomers.Where(customer =>
+            db.LegalClientAssignments.Any(assignment => assignment.CustomerId == customer.Id)
+            || db.LegalCaseFiles.Any(file => file.CollectionCase.CustomerId == customer.Id)
+            || db.CollectionCases.Any(collectionCase =>
+                collectionCase.CustomerId == customer.Id
+                && !collectionCase.IsArchived
+                && collectionCase.Status == CollectionsValues.CaseStatuses.Legal));
+
+    private System.Linq.Expressions.Expression<Func<CollectionCustomer, LegalClientListItemDto>> ClientProjection()
+    {
+        var ar = ApiTextLocalizer.IsArabic;
+        return customer => new LegalClientListItemDto(
+            customer.Id,
+            ar ? customer.FullNameArabic ?? customer.FullNameEnglish ?? customer.CustomerCode
+                : customer.FullNameEnglish ?? customer.FullNameArabic ?? customer.CustomerCode,
+            customer.NationalId,
+            customer.PrimaryPhone,
+            ar ? customer.Organization.NameArabic : customer.Organization.NameEnglish,
+            ar ? customer.AddressArabic ?? customer.AddressEnglish : customer.AddressEnglish ?? customer.AddressArabic,
+            db.CollectionCases.Any(collectionCase => collectionCase.CustomerId == customer.Id
+                && !collectionCase.IsArchived && collectionCase.Status == CollectionsValues.CaseStatuses.Legal)
+                ? "LEGAL"
+                : db.LegalClientAssignments.Where(assignment => assignment.CustomerId == customer.Id)
+                    .Select(assignment => assignment.Status).FirstOrDefault() ?? "ACTIVE",
+            db.CollectionCases.Any(collectionCase => collectionCase.CustomerId == customer.Id
+                && !collectionCase.IsArchived && collectionCase.Status == CollectionsValues.CaseStatuses.Legal),
+            db.LegalClientAssignments.Where(assignment => assignment.CustomerId == customer.Id)
+                .Select(assignment => assignment.UpdatedAt).FirstOrDefault() != default
+                ? db.LegalClientAssignments.Where(assignment => assignment.CustomerId == customer.Id)
+                    .Select(assignment => assignment.UpdatedAt).FirstOrDefault()
+                : db.CollectionCases.Where(collectionCase => collectionCase.CustomerId == customer.Id)
+                    .OrderByDescending(collectionCase => collectionCase.UpdatedAt)
+                    .Select(collectionCase => collectionCase.UpdatedAt).FirstOrDefault());
+    }
+
+    private async Task<LegalClientDetailsDto> MapDetailsAsync(CollectionCustomer customer, CancellationToken token)
+    {
+        var item = await db.CollectionCustomers.AsNoTracking().Where(x => x.Id == customer.Id)
+            .Select(ClientProjection()).SingleAsync(token);
+        var caseNumbers = await db.CollectionCases.AsNoTracking()
+            .Where(x => x.CustomerId == customer.Id && !x.IsArchived)
+            .OrderBy(x => x.CaseNumber)
+            .Select(x => x.CaseNumber)
+            .ToArrayAsync(token);
+        var assignment = await db.LegalClientAssignments.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.CustomerId == customer.Id, token);
+        var documents = await ProjectDocument(db.LegalClientDocuments.AsNoTracking()
+            .Where(x => x.CustomerId == customer.Id).OrderByDescending(x => x.UploadedAt)).ToArrayAsync(token);
+        return new LegalClientDetailsDto(
+            item,
+            customer.CustomerCode,
+            customer.AlternatePhone,
+            customer.TertiaryPhone,
+            customer.Governorate,
+            customer.Area,
+            customer.City,
+            customer.Employer,
+            customer.JobTitle,
+            customer.SecondaryAddress,
+            assignment?.Notes,
+            customer.Notes,
+            customer.Feedback,
+            customer.DataEntrySource,
+            customer.CreatedByUser?.FullName,
+            customer.CreatedAt,
+            caseNumbers,
+            documents,
+            CanManage());
+    }
+
+    private async Task<IReadOnlyList<EvaluatedRow>> EvaluateRowsAsync(
+        IReadOnlyCollection<LegalClientImportSourceRow> rows,
+        CancellationToken token)
+    {
+        var organizations = await db.CollectionClientOrganizations.AsNoTracking()
+            .Where(x => x.IsActive).ToArrayAsync(token);
+        var evaluated = new List<EvaluatedRow>(rows.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in rows)
+        {
+            var errors = new List<string>();
+            var sourceName = ImportName(source);
+            if (sourceName is null) errors.Add("Client name is required.");
+            if (string.IsNullOrWhiteSpace(source.NationalId) && string.IsNullOrWhiteSpace(source.MobileNumber))
+                errors.Add("National ID or mobile number is required.");
+            if (string.IsNullOrWhiteSpace(source.BankName)) errors.Add("Bank name is required.");
+            if (source.Name?.Length > 200) errors.Add("Client name cannot exceed 200 characters.");
+            if (source.NameArabic?.Length > 200 || source.NameEnglish?.Length > 200)
+                errors.Add("Client name cannot exceed 200 characters.");
+            if (source.NationalId?.Length > 32) errors.Add("National ID cannot exceed 32 characters.");
+            if (source.MobileNumber?.Length > 32) errors.Add("Mobile number cannot exceed 32 characters.");
+            if (source.Address?.Length > 600) errors.Add("Address cannot exceed 600 characters.");
+            if (source.AddressArabic?.Length > 600 || source.AddressEnglish?.Length > 600)
+                errors.Add("Address cannot exceed 600 characters.");
+            if (source.Notes?.Length > 2000) errors.Add("Notes cannot exceed 2,000 characters.");
+            if (source.BankName?.Length > 200) errors.Add("Bank name cannot exceed 200 characters.");
+
+            var organizationMatches = organizations.Where(organization =>
+                string.Equals(organization.Code, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(organization.NameEnglish, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(organization.NameArabic, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+            ClientOrganization? organization = organizationMatches.Length == 1 ? organizationMatches[0] : null;
+            if (organizationMatches.Length == 0 && !string.IsNullOrWhiteSpace(source.BankName))
+                errors.Add("Bank name does not match an active MIS organization.");
+            if (organizationMatches.Length > 1)
+                errors.Add("Bank name matches more than one organization; use its unique name or code.");
+
+            var duplicateKey = ImportDuplicateKey(source, organization?.Id);
+            if (duplicateKey is not null && !seen.Add(duplicateKey))
+                errors.Add("This client appears more than once in the uploaded file.");
+
+            CollectionCustomer? customer = null;
+            if (organization is not null && errors.Count == 0)
+                customer = await FindCustomerAsync(organization.Id, source, token);
+            if (customer is not null && await IsLegalClientAsync(customer.Id, token))
+                errors.Add("This customer is already assigned to Legal.");
+            var status = errors.Count > 0 ? (errors.Any(error => error.Contains("appears more than once", StringComparison.Ordinal)
+                || error.Contains("already assigned", StringComparison.Ordinal)) ? "DUPLICATE" : "INVALID")
+                : customer is null ? "VALID" : "EXISTING";
+            evaluated.Add(new EvaluatedRow(source, status, organization, customer, errors));
+        }
+        return evaluated;
+    }
+
+    private async Task<CollectionCustomer?> FindCustomerAsync(Guid organizationId, LegalClientImportSourceRow source, CancellationToken token)
+    {
+        var nationalId = Normalize(source.NationalId);
+        if (nationalId is not null)
+        {
+            var customer = await db.CollectionCustomers.SingleOrDefaultAsync(
+                x => x.OrganizationId == organizationId && x.NationalId == nationalId, token);
+            if (customer is not null) return customer;
+        }
+
+        var phone = Normalize(source.MobileNumber);
+        if (phone is null) return null;
+        var (nameArabic, nameEnglish) = ImportNames(source);
+        var names = new[] { nameArabic, nameEnglish }
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!.ToLowerInvariant())
+            .Distinct()
+            .ToArray();
+        if (names.Length == 0) return null;
+        return await db.CollectionCustomers.Where(x => x.OrganizationId == organizationId && x.PrimaryPhone == phone)
+            .Where(x => (x.FullNameArabic != null && names.Contains(x.FullNameArabic.ToLower()))
+                || (x.FullNameEnglish != null && names.Contains(x.FullNameEnglish.ToLower())))
+            .FirstOrDefaultAsync(token);
+    }
+
+    private CollectionCustomer CreateCustomer(EvaluatedRow row)
+    {
+        var (nameArabic, nameEnglish) = ImportNames(row.Source);
+        var (addressArabic, addressEnglish) = ImportAddresses(row.Source);
+        var customer = new CollectionCustomer(
+            row.Organization!.Id,
+            $"LEGAL-{Guid.NewGuid():N}",
+            nameArabic ?? string.Empty,
+            nameEnglish ?? string.Empty,
+            DateTimeOffset.UtcNow);
+        customer.ApplyImportedContact(
+            nameArabic,
+            nameEnglish,
+            Normalize(row.Source.NationalId),
+            Normalize(row.Source.MobileNumber));
+        if (addressArabic is not null)
+            customer.ApplyImportedProfile(null, null, null, null, null, addressArabic, null, null, null, true);
+        if (addressEnglish is not null)
+            customer.ApplyImportedProfile(null, null, null, null, null, addressEnglish, null, null, null, false);
+        customer.ApplyDataEntryDetails(null, null, "LEGAL", user.UserId);
+        return customer;
+    }
+
+    private async Task EnsureLegalClientAsync(Guid customerId, CancellationToken token)
+    {
+        if (!await LegalClients().AnyAsync(x => x.Id == customerId, token))
+            throw new HrNotFoundException("Legal client was not found.");
+    }
+
+    private async Task<bool> IsLegalClientAsync(Guid customerId, CancellationToken token) =>
+        await LegalClients().AnyAsync(x => x.Id == customerId, token);
+
+    private Task<bool> HasLegalCaseAsync(Guid customerId, CancellationToken token) =>
+        db.CollectionCases.AnyAsync(x => x.CustomerId == customerId
+            && !x.IsArchived && x.Status == CollectionsValues.CaseStatuses.Legal, token);
+
+    private bool CanManage() =>
+        user.Roles.Contains(SystemRoleNames.Admin, StringComparer.OrdinalIgnoreCase)
+        || user.Roles.Contains(SystemRoleNames.LegalOfficer, StringComparer.OrdinalIgnoreCase)
+        || user.Permissions.Contains(SystemPermissionCodes.LegalCaseManage, StringComparer.OrdinalIgnoreCase)
+        || user.Permissions.Contains("*", StringComparer.OrdinalIgnoreCase);
+
+    private void RequireManage()
+    {
+        if (!CanManage()) throw new HrForbiddenException("You do not have permission to manage legal clients.");
+    }
+
+    private void AddAudit(string action, Guid customerId, object? before, object? after) =>
+        db.CollectionAuditLogs.Add(new CollectionAuditLog(user.UserId, action, nameof(LegalClientAssignment),
+            customerId, null, before is null ? null : JsonSerializer.Serialize(before),
+            after is null ? null : JsonSerializer.Serialize(after), "LEGAL", DateTimeOffset.UtcNow));
+
+    private static IQueryable<LegalClientDocumentDto> ProjectDocument(IQueryable<LegalClientDocument> query) =>
+        query.Select(document => new LegalClientDocumentDto(
+            document.Id, document.OriginalFileName, document.ContentType, document.FileSize,
+            document.UploadedByUser.FullName, document.UploadedAt));
+
+    private static LegalClientImportSourceRow MapImportRow(ParsedCollectionRow row, int rowOffset)
+    {
+        var nameArabic = Get(row.Values, "namearabic", "arabicname", "clientnamearabic", "customernamearabic", "اسم العميل بالعربي", "الاسم بالعربي");
+        var nameEnglish = Get(row.Values, "nameenglish", "englishname", "clientnameenglish", "customernameenglish", "اسم العميل بالإنجليزي", "الاسم بالإنجليزي");
+        var addressArabic = Get(row.Values, "addressarabic", "arabicaddress", "العنوان بالعربي");
+        var addressEnglish = Get(row.Values, "addressenglish", "englishaddress", "العنوان بالإنجليزي");
+        return new LegalClientImportSourceRow(
+            Math.Max(row.RowNumber + rowOffset, 2),
+            Get(row.Values, "name", "clientname", "customername", "fullname", "customerfullname", "clientfullname", "الاسم", "اسم العميل", "الاسم الكامل") ?? nameArabic ?? nameEnglish,
+            nameArabic,
+            nameEnglish,
+            Get(row.Values, "nationalid", "nationalidnumber", "nationalnumber", "identitynumber", "idnumber", "nationalidentitynumber", "الرقم القومي", "رقم قومي", "الرقم الوطني", "رقم الهوية"),
+            Get(row.Values, "mobilenumber", "mobile", "mobilephone", "phone", "phonenumber", "telephone", "contactnumber", "رقم الموبايل", "الموبايل", "رقم الهاتف", "الهاتف"),
+            Get(row.Values, "bankname", "bank", "organization", "organizationname", "entitybank", "entity", "اسم البنك", "البنك", "الجهة"),
+            Get(row.Values, "address", "clientaddress", "العنوان") ?? addressArabic ?? addressEnglish,
+            addressArabic,
+            addressEnglish,
+            Get(row.Values, "notes", "note", "ملاحظات"));
+    }
+
+    private static string? Get(IReadOnlyDictionary<string, string> values, params string[] aliases)
+    {
+        var normalizedAliases = aliases.Select(CollectionImportParser.NormalizeHeader).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return values.FirstOrDefault(pair => normalizedAliases.Contains(CollectionImportParser.NormalizeHeader(pair.Key))).Value is { Length: > 0 } value
+            ? value.Trim()
+            : null;
+    }
+
+    private static string? ImportDuplicateKey(LegalClientImportSourceRow row, Guid? organizationId)
+    {
+        if (!organizationId.HasValue) return null;
+        var identity = Normalize(row.NationalId)
+            ?? (Normalize(row.MobileNumber) is { } phone ? $"{phone}:{ImportName(row)?.ToLowerInvariant()}" : null);
+        return identity is null ? null : $"{organizationId}:{identity}";
+    }
+
+    private static string? ImportName(LegalClientImportSourceRow row) =>
+        Normalize(row.Name) ?? Normalize(row.NameArabic) ?? Normalize(row.NameEnglish);
+
+    private static (string? Arabic, string? English) ImportNames(LegalClientImportSourceRow row)
+    {
+        var nameArabic = Normalize(row.NameArabic);
+        var nameEnglish = Normalize(row.NameEnglish);
+        var name = Normalize(row.Name);
+        if (name is not null)
+        {
+            if (ContainsArabic(name)) nameArabic ??= name;
+            else nameEnglish ??= name;
+        }
+        return (nameArabic, nameEnglish);
+    }
+
+    private static (string? Arabic, string? English) ImportAddresses(LegalClientImportSourceRow row)
+    {
+        var addressArabic = Normalize(row.AddressArabic);
+        var addressEnglish = Normalize(row.AddressEnglish);
+        var address = Normalize(row.Address);
+        if (address is not null)
+        {
+            if (ContainsArabic(address)) addressArabic ??= address;
+            else addressEnglish ??= address;
+        }
+        return (addressArabic, addressEnglish);
+    }
+
+    private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string SafeFileName(string fileName) => Path.GetFileName(fileName).Trim();
+    private static bool ContainsArabic(string value) => value.Any(character => character is >= '\u0600' and <= '\u06ff');
+    private static string? LocalizedCustomerName(CollectionCustomer? customer) =>
+        customer is null ? null : ApiTextLocalizer.IsArabic
+            ? customer.FullNameArabic ?? customer.FullNameEnglish ?? customer.CustomerCode
+            : customer.FullNameEnglish ?? customer.FullNameArabic ?? customer.CustomerCode;
+
+    private static async Task<string> ValidateDocumentContentAsync(Stream stream, string extension, CancellationToken token)
+    {
+        if (!stream.CanSeek) throw new HrValidationException("Document stream must be seekable.");
+        var header = new byte[8];
+        var read = await stream.ReadAsync(header, token);
+        stream.Position = 0;
+        var pdf = read >= 5 && header.AsSpan(0, 5).SequenceEqual("%PDF-"u8);
+        var jpeg = read >= 3 && header[0] == 0xff && header[1] == 0xd8 && header[2] == 0xff;
+        var png = read >= 8 && header.AsSpan(0, 8).SequenceEqual(new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a });
+        return extension switch
+        {
+            ".pdf" when pdf => "application/pdf",
+            ".jpg" or ".jpeg" when jpeg => "image/jpeg",
+            ".png" when png => "image/png",
+            _ => throw new HrValidationException("Only content-validated PDF, JPEG, and PNG documents are supported.")
+        };
+    }
+}

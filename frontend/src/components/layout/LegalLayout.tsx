@@ -1,4 +1,4 @@
-import { LayoutDashboard, Scale } from 'lucide-react';
+import { FileUp, FolderOpen, LayoutDashboard, UsersRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocalization } from '../../context/LocalizationContext';
@@ -6,7 +6,9 @@ import { ModuleLayoutShell, type ModuleNavigationItem } from './ModuleLayoutShel
 
 const links = [
   ['/legal/dashboard', 'لوحة التحكم', 'Dashboard', LayoutDashboard],
-  ['/legal/cases', 'القضايا', 'Cases', Scale],
+  ['/legal/clients', 'العملاء', 'Clients', UsersRound],
+  ['/legal/upload-clients', 'رفع العملاء', 'Upload Clients', FileUp],
+  ['/legal/client-files', 'ملفات العملاء', 'Client Files', FolderOpen],
 ] as const;
 
 export function LegalLayout() {
@@ -29,7 +31,7 @@ export function LegalLayout() {
       isRtl={isRtl}
       languageLabel={ar ? 'English' : 'العربية'}
       moduleName={ar ? 'الشؤون القانونية' : 'MIS Legal'}
-      moduleSubtitle={ar ? 'قضايا التحصيل المحوّلة بحالة LEGAL' : 'Collection cases referred with LEGAL status'}
+      moduleSubtitle={ar ? 'إدارة العملاء والملفات القانونية' : 'Client and legal file management'}
       navigation={navigation}
       navigationLabel={ar ? 'قائمة الشؤون القانونية' : 'Legal navigation'}
       onLanguageToggle={() => setLanguage(ar ? 'en' : 'ar')}
@@ -42,6 +44,7 @@ export function LegalLayout() {
       profileLabel={ar ? 'ملفي الشخصي' : 'My profile'}
       profilePath="/legal/profile"
       signOutLabel={ar ? 'تسجيل الخروج' : 'Sign out'}
+      showProfileLink={false}
       storageKey="mis.legal.sidebar"
       theme="legal"
       userName={user?.fullName}

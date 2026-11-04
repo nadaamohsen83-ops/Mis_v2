@@ -56,6 +56,7 @@ public static class DependencyInjection
         services.AddScoped<IFinanceService>(serviceProvider => serviceProvider.GetRequiredService<FinanceService>());
         services.AddScoped<IAccountingService, AccountingService>();
         services.AddScoped<IAccountingBookService, AccountingBookService>();
+        services.AddScoped<IFinanceClaimsService, FinanceClaimsService>();
         services.AddScoped<IFinancePostingService>(serviceProvider => serviceProvider.GetRequiredService<FinanceService>());
         services.AddScoped<ICollectionsClassificationContext, CollectionsClassificationContext>();
         services.AddScoped<ICollectionsService, CollectionsService>();
@@ -66,6 +67,7 @@ public static class DependencyInjection
         services.AddScoped<IBankCustomerImportService, BankCustomerImportService>();
         services.AddScoped<IDataEntryService, DataEntryService>();
         services.AddScoped<ILegalService, LegalService>();
+        services.AddScoped<ILegalClientService, LegalClientService>();
         services.AddScoped<ILegalCaseImportService, LegalCaseImportService>();
         services.AddScoped<IBankCaseDistributionService, BankCaseDistributionService>();
         services.AddScoped<IBankDistributionImportService, BankDistributionImportService>();

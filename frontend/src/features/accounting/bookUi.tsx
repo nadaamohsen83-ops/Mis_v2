@@ -13,10 +13,10 @@ export const categories: Record<string, [string, string, string]> = {
   TRANSPORTATION: ['انتقالات', 'Transportation', '610130'], ADVANCE: ['سلف', 'Employee advances', '113100'], CARRIED_ADVANCE: ['سلف مرحلة', 'Carried advances', '113100'],
   SUPERVISOR_COMMISSION: ['عمولات سوبر فايزر', 'Supervisor commissions', '610180'], COLLECTOR_COMMISSION: ['عمولات محصلين', 'Collector commissions', '610170'],
   SALARY: ['المرتبات', 'Salaries', '610140'], BONUS: ['مكافآت', 'Bonuses', '610150'], LEGAL: ['مصاريف قضائية', 'Judicial expenses', '610160'],
-  INCOME: ['وارد الشركة', 'Company income', '410100'], ADVANCE_REPAYMENT: ['سداد سلفة', 'Advance repayment', '113100'], PAYROLL_COMMISSION: ['عمولات ضمن المرتبات', 'Commissions in payroll', '610190'], OTHER: ['مصاريف أخرى', 'Other expenses', '610100'],
+  INCOME: ['وارد الشركة', 'Company income', '210300'], REVENUE: ['إيرادات', 'Revenue', '410100'], ADVANCE_REPAYMENT: ['سداد سلفة', 'Advance repayment', '113100'], PAYROLL_COMMISSION: ['عمولات ضمن المرتبات', 'Commissions in payroll', '610190'], OTHER: ['مصاريف أخرى', 'Other expenses', '610100'],
 };
-export const manualCategories = ['PETTY', 'FIXED', 'ADVANCE', 'CARRIED_ADVANCE', 'BONUS', 'LEGAL', 'INCOME', 'ADVANCE_REPAYMENT', 'OTHER'];
-export const categoryPaths: Record<string, string> = { PETTY: 'petty-expenses', FIXED: 'fixed-expenses', TRANSPORTATION: 'transportation', ADVANCE: 'advances', CARRIED_ADVANCE: 'advances', SUPERVISOR_COMMISSION: 'supervisor-commissions', COLLECTOR_COMMISSION: 'collector-commissions', SALARY: 'salaries', BONUS: 'bonuses', LEGAL: 'judicial-expenses', INCOME: 'income', PAYROLL_COMMISSION: 'salaries', OTHER: 'expenses' };
+export const manualCategories = ['PETTY', 'FIXED', 'ADVANCE', 'CARRIED_ADVANCE', 'BONUS', 'LEGAL', 'INCOME', 'REVENUE', 'ADVANCE_REPAYMENT', 'OTHER'];
+export const categoryPaths: Record<string, string> = { PETTY: 'petty-expenses', FIXED: 'fixed-expenses', TRANSPORTATION: 'transportation', ADVANCE: 'advances', CARRIED_ADVANCE: 'advances', SUPERVISOR_COMMISSION: 'supervisor-commissions', COLLECTOR_COMMISSION: 'collector-commissions', SALARY: 'salaries', BONUS: 'bonuses', LEGAL: 'judicial-expenses', INCOME: 'income', REVENUE: 'revenue', PAYROLL_COMMISSION: 'salaries', OTHER: 'expenses' };
 export const cairoToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 export const monthRange = () => { const today = cairoToday(); return { from: today.slice(0, 7) + '-01', to: today }; };
 export const panel = 'rounded-2xl border border-mis-border bg-white p-5 shadow-sm';

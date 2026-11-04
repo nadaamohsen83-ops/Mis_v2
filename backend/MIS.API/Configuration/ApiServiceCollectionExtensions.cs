@@ -121,6 +121,14 @@ public static class ApiServiceCollectionExtensions
             options.AddPolicy(AuthorizationPolicies.FinanceCollectionReview, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => context.User.IsInRole(SystemRoleNames.Admin) || HasPermission(context.User, SystemPermissionCodes.FinanceCollectionReview) || HasPermission(context.User, "accounting.transaction.manage")));
             options.AddPolicy(AuthorizationPolicies.FinanceCustodyView, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => context.User.IsInRole(SystemRoleNames.Admin) || HasPermission(context.User, SystemPermissionCodes.FinanceCustodyView) || HasPermission(context.User, "accounting.access")));
             options.AddPolicy(AuthorizationPolicies.FinanceCustodyReconcile, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => context.User.IsInRole(SystemRoleNames.Admin) || HasPermission(context.User, SystemPermissionCodes.FinanceCustodyReconcile) || HasPermission(context.User, "accounting.approve")));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsView, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsView)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsCreate, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsCreate)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsEdit, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsEdit)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsImport, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsImport)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsConfirmReceipt, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsConfirmReceipt)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsReverseReceipt, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsReverseReceipt)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsCancel, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsCancel)));
+            options.AddPolicy(AuthorizationPolicies.FinanceClaimsExport, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => FinanceClaimsPermission(context, SystemPermissionCodes.FinanceClaimsExport)));
             options.AddPolicy(AuthorizationPolicies.AccountingAccess, policy => policy.RequireAuthenticatedUser().RequireAssertion(AccountingUser));
             options.AddPolicy(AuthorizationPolicies.AccountingPayrollManage, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => AccountingUser(context) || HasPermission(context.User, SystemPermissionCodes.AccountingPayrollManage)));
             options.AddPolicy(AuthorizationPolicies.AccountingPayrollApprove, policy => policy.RequireAuthenticatedUser().RequireAssertion(context => AccountingUser(context) || HasPermission(context.User, SystemPermissionCodes.AccountingPayrollApprove) || HasPermission(context.User, "accounting.approve")));
@@ -161,6 +169,9 @@ public static class ApiServiceCollectionExtensions
         || HasPermission(context.User, SystemPermissionCodes.LegalCaseManage)
         || context.User.IsInRole(SystemRoleNames.LegalOfficer)
         || context.User.HasClaim("department", DepartmentCodes.Legal);
+
+    private static bool FinanceClaimsPermission(AuthorizationHandlerContext context, string permission) =>
+        context.User.IsInRole(SystemRoleNames.Admin) || HasPermission(context.User, permission);
 
     private static bool DataEntryUser(AuthorizationHandlerContext context) =>
         context.User.IsInRole(SystemRoleNames.Admin)

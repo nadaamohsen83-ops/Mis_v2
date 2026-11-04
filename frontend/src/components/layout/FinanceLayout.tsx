@@ -1,4 +1,4 @@
-import { Banknote, BarChart3, BookOpenText, CalendarRange, Car, LayoutDashboard, Percent, ReceiptText, Scale, ShieldCheck, UsersRound, Wallet, WalletCards } from 'lucide-react';
+import { Banknote, BarChart3, BookOpenText, CalendarRange, Car, FileSpreadsheet, LayoutDashboard, Percent, ReceiptText, Scale, ShieldCheck, UsersRound, Wallet, WalletCards } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocalization } from '../../context/LocalizationContext';
@@ -12,11 +12,13 @@ export function FinanceLayout() {
   const ar = language === 'ar';
   const finance = ar ? 'المالية' : 'Finance';
   const payroll = ar ? 'المرتبات والعمولات' : 'Payroll & commissions';
+  const canViewClaims = user?.roles.includes('Admin') || user?.permissions.includes('*') || user?.permissions.includes('finance.claims.view');
   const navigation: ModuleNavigationItem[] = [
     { to: '/finance/dashboard', icon: LayoutDashboard, label: ar ? 'لوحة المالية' : 'Finance dashboard', group: finance },
     { to: '/finance/expenses', icon: ReceiptText, label: ar ? 'سجل المصاريف والوارد' : 'Expenses & income register', group: ar ? 'مصروفات الشركة' : 'Company expenses' },
-    ...(['PETTY', 'FIXED', 'BONUS', 'LEGAL', 'INCOME'] as const).map((key) => ({ to: '/finance/' + ({ PETTY: 'petty-expenses', FIXED: 'fixed-expenses', BONUS: 'bonuses', LEGAL: 'judicial-expenses', INCOME: 'income' }[key]), icon: Wallet, label: categories[key][ar ? 0 : 1], group: ar ? 'مصروفات الشركة' : 'Company expenses' })),
+    ...(['PETTY', 'FIXED', 'BONUS', 'LEGAL', 'INCOME', 'REVENUE'] as const).map((key) => ({ to: '/finance/' + ({ PETTY: 'petty-expenses', FIXED: 'fixed-expenses', BONUS: 'bonuses', LEGAL: 'judicial-expenses', INCOME: 'income', REVENUE: 'revenue' }[key]), icon: Wallet, label: categories[key][ar ? 0 : 1], group: ar ? 'مصروفات الشركة' : 'Company expenses' })),
     { to: '/finance/recurring', icon: CalendarRange, label: ar ? 'إعداد المصاريف الثابتة' : 'Recurring expense settings', group: ar ? 'مصروفات الشركة' : 'Company expenses' },
+    ...(canViewClaims ? [{ to: '/finance/claims', icon: FileSpreadsheet, label: ar ? 'المطالبات' : 'Claims', group: finance }] : []),
     { to: '/finance/advances', icon: WalletCards, label: t('advancesTitle'), group: payroll },
     { to: '/finance/commission-calculation', icon: Percent, label: ar ? 'حساب العمولات' : 'Commission calculator', group: payroll },
     { to: '/finance/exports', icon: BarChart3, label: ar ? 'مركز السحبات Excel' : 'Excel export center', group: finance },
@@ -25,7 +27,8 @@ export function FinanceLayout() {
     { to: '/finance/journals', icon: BookOpenText, label: ar ? 'القيود اليومية' : 'Journals', group: finance },
     { to: '/finance/accounts', icon: Scale, label: ar ? 'دليل الحسابات' : 'Chart of accounts', group: finance },
     { to: '/finance/periods', icon: CalendarRange, label: ar ? 'الفترات والإقفال' : 'Periods & close', group: finance },
-    { to: '/finance/reports', icon: BarChart3, label: ar ? 'التقارير المالية' : 'Financial reports', group: finance },
+    { to: '/finance/reports', icon: BarChart3, label: ar ? 'ميزان المراجعة' : 'Trial Balance', group: ar ? 'التقارير المالية' : 'Financial Reports' },
+    { to: '/finance/profit-loss', icon: BarChart3, label: ar ? 'قائمة الأرباح والخسائر' : 'Profit & Loss', group: ar ? 'التقارير المالية' : 'Financial Reports' },
     { to: '/finance/salaries', icon: Wallet, label: ar ? 'المرتبات' : 'Salaries', group: payroll },
     { to: '/finance/transportation', icon: Car, label: ar ? 'الانتقالات' : 'Transportation', group: payroll },
     { to: '/finance/collector-commissions', icon: Banknote, label: ar ? 'عمولات المحصلين' : 'Collector commissions', group: payroll },

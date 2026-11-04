@@ -34,6 +34,7 @@ interface ModuleLayoutShellProps {
   profileLabel: string;
   profilePath: string;
   signOutLabel: string;
+  showProfileLink?: boolean;
   showCurrentPageTitle?: boolean;
   storageKey: string;
   theme: ModuleTheme;
@@ -149,18 +150,20 @@ export function ModuleLayoutShell(props: ModuleLayoutShellProps) {
         </nav>
 
         <div className="module-sidebar-footer shrink-0 border-t border-mis-border bg-slate-50/90 p-3">
-          <NavLink
-            to={props.profilePath}
-            aria-label={props.profileLabel}
-            title={props.profileLabel}
-            className={({ isActive }) => `module-sidebar-link mb-1 flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 ${isActive ? chrome.active : 'text-slate-600 hover:bg-white'}`}
-          >
-            <UserCircle className="h-7 w-7 shrink-0 text-mis-muted" />
-            <div className="module-sidebar-label min-w-0">
-              <p className="truncate text-sm font-semibold leading-5 text-mis-navy">{props.userName || '—'}</p>
-              <p className="truncate text-xs leading-5 text-slate-500">{props.profileLabel}</p>
-            </div>
-          </NavLink>
+          {props.showProfileLink !== false ? (
+            <NavLink
+              to={props.profilePath}
+              aria-label={props.profileLabel}
+              title={props.profileLabel}
+              className={({ isActive }) => `module-sidebar-link mb-1 flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 ${isActive ? chrome.active : 'text-slate-600 hover:bg-white'}`}
+            >
+              <UserCircle className="h-7 w-7 shrink-0 text-mis-muted" />
+              <div className="module-sidebar-label min-w-0">
+                <p className="truncate text-sm font-semibold leading-5 text-mis-navy">{props.userName || '—'}</p>
+                <p className="truncate text-xs leading-5 text-slate-500">{props.profileLabel}</p>
+              </div>
+            </NavLink>
+          ) : null}
           <ModuleSwitcherLink collapsed={collapsed} />
           <div className="module-sidebar-footer-actions mt-1 grid grid-cols-2 gap-1">
             <button

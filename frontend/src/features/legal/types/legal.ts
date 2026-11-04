@@ -1,10 +1,99 @@
 export interface LegalDashboard {
-  openCases: number;
-  intakeCases: number;
-  hearingsThisWeek: number;
-  returnedThisMonth: number;
-  outstandingTotal: number;
+  totalClients: number;
+  recentlyAddedClients: number;
+  transferredFromCollections: number;
+  recentlyUpdatedClientFiles: number;
+  recentlyAdded: LegalClientListItem[];
   canManage: boolean;
+}
+
+export interface LegalClientListItem {
+  customerId: string;
+  name: string;
+  nationalId?: string | null;
+  mobileNumber?: string | null;
+  bankName: string;
+  address?: string | null;
+  status: string;
+  transferredFromCollections: boolean;
+  updatedAt: string;
+}
+
+export interface LegalClientPage {
+  items: LegalClientListItem[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export interface LegalClientDocument {
+  id: string;
+  originalFileName: string;
+  contentType: string;
+  fileSize: number;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface LegalClientDetails {
+  client: LegalClientListItem;
+  customerCode: string;
+  alternatePhone?: string | null;
+  tertiaryPhone?: string | null;
+  governorate?: string | null;
+  area?: string | null;
+  city?: string | null;
+  employer?: string | null;
+  jobTitle?: string | null;
+  secondaryAddress?: string | null;
+  notes?: string | null;
+  customerNotes?: string | null;
+  customerFeedback?: string | null;
+  dataEntrySource?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  collectionCaseNumbers: string[];
+  documents: LegalClientDocument[];
+  canManage: boolean;
+}
+
+export interface LegalClientImportSourceRow {
+  rowNumber: number;
+  name?: string | null;
+  nameArabic?: string | null;
+  nameEnglish?: string | null;
+  nationalId?: string | null;
+  mobileNumber?: string | null;
+  bankName?: string | null;
+  address?: string | null;
+  addressArabic?: string | null;
+  addressEnglish?: string | null;
+  notes?: string | null;
+}
+
+export interface LegalClientImportPreviewRow {
+  source: LegalClientImportSourceRow;
+  status: 'VALID' | 'EXISTING' | 'INVALID' | 'DUPLICATE';
+  matchedCustomerName?: string | null;
+  errors: string[];
+}
+
+export interface LegalClientImportPreview {
+  fileName: string;
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  existingCustomersMatched: number;
+  duplicateRows: number;
+  rows: LegalClientImportPreviewRow[];
+}
+
+export interface LegalClientImportResult {
+  totalRows: number;
+  successfulRows: number;
+  failedRows: number;
+  rows: Array<{ rowNumber: number; status: string; errors: string[] }>;
 }
 
 export interface LegalOrganization {

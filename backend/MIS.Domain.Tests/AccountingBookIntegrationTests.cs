@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using MIS.Application.Common;
 using MIS.Application.DTOs.Accounting;
+using MIS.Application.DTOs.Finance;
 using MIS.Application.Interfaces;
 using MIS.Domain.Entities;
 using MIS.Infrastructure.Persistence;
@@ -44,23 +45,30 @@ public sealed class AccountingBookIntegrationTests
             var bm = new AccountingBookService(db, new BookTestPrincipal(maker.Id), fm); var br = new AccountingBookService(db, new BookTestPrincipal(reviewer.Id), fr);
             await fm.InitializeYearAsync(today.Year, default);
             var accounts = await fm.GetAccountsAsync(default); Guid Account(string code) => accounts.Single(x => x.Code == code).Id;
-            async Task<AccountingBookEntryDto> Create(string cat, decimal amount, DateOnly? date = null, Guid? related = null) => await bm.CreateAsync(new(cat, date ?? today, amount, Account(cat switch { "INCOME" => "410100", "ADVANCE" or "CARRIED_ADVANCE" or "ADVANCE_REPAYMENT" => "113100", _ => "610110" }), Account(cat == "CARRIED_ADVANCE" ? "310100" : "110300"), "Isolated test " + cat, null, cat.Contains("ADVANCE") ? employee.Id : null, related, Guid.NewGuid()), default);
+            var emptyProfitLoss = await bm.ProfitLossAsync(today.AddMonths(1), today.AddMonths(1), default);
+            Check(emptyProfitLoss.TotalRevenue == 0 && emptyProfitLoss.TotalExpenses == 0 && emptyProfitLoss.NetProfitLoss == 0 &&
+                  emptyProfitLoss.RevenueCategories.Count == 0 && emptyProfitLoss.ExpenseCategories.Count == 0,
+                "an empty accounting period returns a successful zero profit and loss report");
+            await Assert.ThrowsAsync<HrValidationException>(() => bm.ProfitLossAsync(today, today.AddDays(-1), default));
+            async Task<AccountingBookEntryDto> Create(string cat, decimal amount, DateOnly? date = null, Guid? related = null) => await bm.CreateAsync(new(cat, date ?? today, amount, Account(MIS.Domain.Constants.AccountingBookValues.AccountCode(cat)), Account(cat == "CARRIED_ADVANCE" ? "310100" : "110300"), "Isolated test " + cat, null, cat.Contains("ADVANCE") ? employee.Id : null, related, Guid.NewGuid()), default);
             async Task Post(AccountingBookEntryDto d) { Assert.Equal("POSTED", d.Status); Assert.Equal("POSTED", (await bm.TransitionAsync(d.Id, "record", null, default)).Status); }
             void Check(bool value, string name) { if (!value) throw new Exception("FAIL " + name); Console.WriteLine("PASS " + name); }
             async Task Conflict(Func<Task> run, string label) { try { await run(); throw new Exception("Expected conflict: " + label); } catch (HrConflictException) { Console.WriteLine("PASS " + label); } }
             var petty = await Create("PETTY", 400.25m); await Post(petty);
             Check(petty.JournalNumber is not null, "confirmed expense records immediately without approval");
             var income = await Create("INCOME", 1000); await Post(income);
+            Assert.Equal("COMPANY_INCOME", await db.JournalEntries.Where(x => x.Id == income.JournalEntryId).Select(x => x.EntryType).SingleAsync());
             var advance = await Create("ADVANCE", 400, today.AddDays(-2)); await Post(advance);
             var opening = await Create("CARRIED_ADVANCE", 200, today.AddDays(-3)); await Post(opening);
             var repay = await Create("ADVANCE_REPAYMENT", 100, related: advance.Id); await Post(repay);
+            var priorCompanyIncome = await Create("INCOME", 100000, today.AddMonths(-1)); await Post(priorCompanyIncome);
             await Conflict(() => Create("ADVANCE_REPAYMENT", 301, related: advance.Id), "over-repayment blocked");
             await Conflict(() => fr.ReverseJournalAsync(advance.JournalEntryId, new("test"), default), "direct reversal cannot orphan repayments");
             var balances = await bm.AdvancesAsync(today, null, null, default);
             Check(balances.Sum(x => x.Remaining) == 500, "advance remaining balances");
             Check(balances.Single(x => x.Id == opening.Id).Carried, "opening advance marked carried");
             var summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
-            Check(summary.Income == 1000 && summary.Expenses == 400.25m && summary.CashIn == 1100 && summary.CashOut == 800.25m, "cash flow and expenses exclude opening balances and repayments");
+            Check(summary.CompanyIncome == 100599.75m && summary.Revenue == 0 && summary.Expenses == 400.25m && summary.CashIn == 1100 && summary.CashOut == 800.25m, "company income carries its prior balance, nets normal expenses and excludes advances");
             await bm.SaveRecurringAsync(null, new("Monthly test", 50, 1, Account("610120"), Account("110300"), new(today.Year, today.Month, 1), null, new string('n', 500)), default);
             var first = await bm.GenerateRecurringAsync(new(today.Year, today.Month), default); var second = await bm.GenerateRecurringAsync(new(today.Year, today.Month), default);
             Check(first.Created == 1 && second.Created == 0 && second.AlreadyGenerated == 1, "recurring generation is idempotent");
@@ -72,9 +80,163 @@ public sealed class AccountingBookIntegrationTests
             await fr.ReverseJournalAsync(petty.JournalEntryId, new("test correction"), default);
             summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
             Check(summary.Expenses == 750 && summary.CashIn == 1500.25m && summary.CashOut == 1550.25m, "reversal corrects expense and cash flow once");
+            var companyIncomeBeforeMovements = summary.CompanyIncome;
+            var normalRevenue = await Create("REVENUE", 1000); await Post(normalRevenue);
+            var fixedExpense = await Create("FIXED", 100); await Post(fixedExpense);
+            var bonusExpense = await Create("BONUS", 50); await Post(bonusExpense);
+            var legalExpense = await Create("LEGAL", 75); await Post(legalExpense);
+            var otherExpense = await Create("OTHER", 25); await Post(otherExpense);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == companyIncomeBeforeMovements + 750 && summary.Revenue == 1000 &&
+                  summary.Expenses == 1000 && summary.Categories.Single(x => x.Category == "BONUS").Amount == 50 &&
+                  summary.Categories.Single(x => x.Category == "LEGAL").Amount == 75,
+                "revenue increases company income while fixed, bonus, legal and other expenses decrease it");
+            var manualRevenueJournal = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                (await fm.GetPeriodsAsync(today.Year, default)).Single(x => x.PeriodNumber == today.Month).Id, null, "MANUAL",
+                today, today, "EGP", "Manual revenue receipt", maker.Id, now);
+            manualRevenueJournal.AddLine(Account("110300"), 30, 0, 30, 0, 1, "Manual revenue receipt");
+            manualRevenueJournal.AddLine(Account("410100"), 0, 30, 0, 30, 1, "Manual revenue receipt");
+            manualRevenueJournal.Post("ACC-MANUAL-REVENUE", maker.Id, now, true);
+            db.JournalEntries.Add(manualRevenueJournal); await db.SaveChangesAsync();
+            var manualExpenseJournal = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                manualRevenueJournal.PeriodId, null, "MANUAL", today, today, "EGP", "Manual expense payment", maker.Id, now);
+            manualExpenseJournal.AddLine(Account("610100"), 20, 0, 20, 0, 1, "Manual expense payment");
+            manualExpenseJournal.AddLine(Account("110300"), 0, 20, 0, 20, 1, "Manual expense payment");
+            manualExpenseJournal.Post("ACC-MANUAL-EXPENSE", maker.Id, now, true);
+            db.JournalEntries.Add(manualExpenseJournal); await db.SaveChangesAsync();
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == companyIncomeBeforeMovements + 760 && summary.Revenue == 1030 &&
+                  summary.Expenses == 1020,
+                "manual journal inflows and outflows affect company income once");
+            var manualReceipt = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                manualRevenueJournal.PeriodId, null, "MANUAL", today, today, "EGP", "Other manual receipt", maker.Id, now);
+            manualReceipt.AddLine(Account("110300"), 40, 0, 40, 0, 1, "Other manual receipt");
+            manualReceipt.AddLine(Account("210300"), 0, 40, 0, 40, 1, "Other manual receipt");
+            manualReceipt.Post("ACC-MANUAL-RECEIPT", maker.Id, now, true);
+            db.JournalEntries.Add(manualReceipt); await db.SaveChangesAsync();
+            var manualOutflow = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                manualRevenueJournal.PeriodId, null, "MANUAL", today, today, "EGP", "Other manual outflow", maker.Id, now);
+            manualOutflow.AddLine(Account("210300"), 15, 0, 15, 0, 1, "Other manual outflow");
+            manualOutflow.AddLine(Account("110300"), 0, 15, 0, 15, 1, "Other manual outflow");
+            manualOutflow.Post("ACC-MANUAL-OUTFLOW", maker.Id, now, true);
+            db.JournalEntries.Add(manualOutflow); await db.SaveChangesAsync();
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == companyIncomeBeforeMovements + 785 && summary.Revenue == 1030 &&
+                  summary.Expenses == 1020,
+                "other manual cash receipts and outflows change company income by their net direction");
+            await fr.ReverseJournalAsync(fixedExpense.JournalEntryId, new("Expense correction"), default);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == companyIncomeBeforeMovements + 885 &&
+                  summary.Expenses == 920,
+                "reversing a normal expense restores its company income effect");
             var bytes = await bm.ExportAsync("all", new(From: new(today.Year, today.Month, 1), To: today), default);
             using var workbook = new XLWorkbook(new MemoryStream(bytes)); Check(workbook.Worksheets.Count() >= 10, "full multi-sheet workbook loads successfully");
             var preview = await bm.PreviewCommissionsAsync(today.Year, today.Month, default); Check(preview.MissingRuleScopes.Count == 2, "missing commission rules are explicit");
+
+            var incomeBeforeAdvance = summary.CompanyIncome;
+            var revenueBeforeAdvance = summary.Revenue;
+            var advancesBeforeIncomeAndRevenue = await bm.AdvancesAsync(new(EmployeeId: employee.Id), default);
+            var additionalCompanyIncome = await Create("INCOME", 10000);
+            await Post(additionalCompanyIncome);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance + 10000 && summary.Revenue == revenueBeforeAdvance,
+                "company income receipts change the net company income without affecting advances");
+            var dashboard = await fm.GetDashboardAsync(default);
+            var revenueBeforeManualRevenue = dashboard.RevenueMonthToDate;
+            var revenueTransaction = await Create("REVENUE", 5000);
+            await Post(revenueTransaction);
+            Assert.Equal("REVENUE", await db.JournalEntries.Where(x => x.Id == revenueTransaction.JournalEntryId).Select(x => x.EntryType).SingleAsync());
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            dashboard = await fm.GetDashboardAsync(default);
+            var advancesAfterIncomeAndRevenue = await bm.AdvancesAsync(new(EmployeeId: employee.Id), default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance + 15000 && summary.Revenue == revenueBeforeAdvance + 5000 &&
+                  dashboard.RevenueMonthToDate == revenueBeforeManualRevenue + 5000 &&
+                  advancesAfterIncomeAndRevenue.TotalPaid == advancesBeforeIncomeAndRevenue.TotalPaid &&
+                  advancesAfterIncomeAndRevenue.TotalRemaining == advancesBeforeIncomeAndRevenue.TotalRemaining,
+                "revenue changes only revenue and both income modules leave advances unchanged");
+            await fr.ReverseJournalAsync(additionalCompanyIncome.JournalEntryId, new("test company income reversal"), default);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            dashboard = await fm.GetDashboardAsync(default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance + 5000 && summary.Revenue == revenueBeforeAdvance + 5000 &&
+                  dashboard.RevenueMonthToDate == revenueBeforeManualRevenue + 5000,
+                "reversing company income changes only company income");
+            await fr.ReverseJournalAsync(revenueTransaction.JournalEntryId, new("test revenue reversal"), default);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            dashboard = await fm.GetDashboardAsync(default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance && summary.Revenue == revenueBeforeAdvance &&
+                  dashboard.RevenueMonthToDate == revenueBeforeManualRevenue,
+                "reversing revenue changes only revenue");
+            async Task<AccountingAdvancesResultDto> GetEmployeeAdvanceTotals() =>
+                await bm.AdvancesAsync(new(EmployeeId: employee.Id), default);
+            var totalsBeforeAdvance = await GetEmployeeAdvanceTotals();
+            var independentAdvance = await Create("ADVANCE", 10000);
+            await Post(independentAdvance);
+            async Task<AccountingAdvanceDto> GetIndependentAdvance() =>
+                (await GetEmployeeAdvanceTotals()).Items.Single(x => x.Id == independentAdvance.Id);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance && summary.Revenue == revenueBeforeAdvance, "creating an advance does not affect company income or revenue");
+            var totalsAfterAdvance = await GetEmployeeAdvanceTotals();
+            var advanceState = await GetIndependentAdvance();
+            Check(advanceState.Repaid == 0 && advanceState.Remaining == 10000 && advanceState.Status == "OPEN" &&
+                  totalsAfterAdvance.TotalPaid == totalsBeforeAdvance.TotalPaid &&
+                  totalsAfterAdvance.TotalRemaining == totalsBeforeAdvance.TotalRemaining + 10000,
+                "new advance balance and totals start independently");
+
+            await Assert.ThrowsAsync<MIS.Application.Common.HrValidationException>(() =>
+                Create("INCOME", 50, related: independentAdvance.Id));
+            await db.AccountingBookEntries.Where(x => x.Id == income.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.RelatedAdvanceId, independentAdvance.Id), default);
+            var asOfAdvance = (await bm.AdvancesAsync(today, null, employee.Id, default)).Single(x => x.Id == independentAdvance.Id);
+            Check((await GetIndependentAdvance()).Remaining == 10000 && asOfAdvance.Remaining == 10000,
+                "legacy cross-linked income cannot change current or as-of advance balances");
+
+            var independentPartialPayment = await Create("ADVANCE_REPAYMENT", 2000, related: independentAdvance.Id);
+            await Post(independentPartialPayment);
+            advanceState = await GetIndependentAdvance();
+            var partialTotals = await GetEmployeeAdvanceTotals();
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(advanceState.Repaid == 2000 && advanceState.Remaining == 8000 && advanceState.Status == "PARTIAL" &&
+                  partialTotals.TotalPaid == totalsAfterAdvance.TotalPaid + 2000 &&
+                  partialTotals.TotalRemaining == totalsAfterAdvance.TotalRemaining - 2000 &&
+                  summary.CompanyIncome == incomeBeforeAdvance && summary.Revenue == revenueBeforeAdvance,
+                "partial repayment updates only the advance balance, not company income or revenue");
+
+            var independentFinalPayment = await Create("ADVANCE_REPAYMENT", 8000, related: independentAdvance.Id);
+            await Post(independentFinalPayment);
+            advanceState = await GetIndependentAdvance();
+            var settledTotals = await GetEmployeeAdvanceTotals();
+            var advanceDetails = await bm.AdvanceDetailsAsync(independentAdvance.Id, default);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(advanceState.Repaid == 10000 && advanceState.Remaining == 0 && advanceState.Status == "SETTLED" &&
+                  settledTotals.TotalPaid == totalsAfterAdvance.TotalPaid + 10000 &&
+                  settledTotals.TotalRemaining == totalsAfterAdvance.TotalRemaining &&
+                  advanceDetails.Payments.Count == 2 && summary.CompanyIncome == incomeBeforeAdvance && summary.Revenue == revenueBeforeAdvance,
+                "full repayment settles the advance while preserving payment history and both income totals");
+
+            await fr.ReverseJournalAsync(independentFinalPayment.JournalEntryId, new("test repayment reversal"), default);
+            advanceState = await GetIndependentAdvance();
+            var reversedTotals = await GetEmployeeAdvanceTotals();
+            advanceDetails = await bm.AdvanceDetailsAsync(independentAdvance.Id, default);
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(advanceState.Repaid == 2000 && advanceState.Remaining == 8000 &&
+                  reversedTotals.TotalPaid == totalsBeforeAdvance.TotalPaid + 2000 &&
+                  reversedTotals.TotalRemaining == totalsBeforeAdvance.TotalRemaining + 8000 &&
+                  summary.CompanyIncome == incomeBeforeAdvance && summary.Revenue == revenueBeforeAdvance,
+                "reversing an advance payment restores its balance without changing company income or revenue");
+            Check(advanceDetails.Payments.Count == 2 && advanceDetails.Payments.Single(x => x.Id == independentFinalPayment.Id).Status == "REVERSED",
+                "reversed payments remain visible in advance history");
+
+            var addedIncome = await Create("INCOME", 300);
+            await Post(addedIncome);
+            advanceState = await GetIndependentAdvance();
+            var totalsAfterIncome = await GetEmployeeAdvanceTotals();
+            summary = await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default);
+            Check(summary.CompanyIncome == incomeBeforeAdvance + 300 && summary.Revenue == revenueBeforeAdvance &&
+                  advanceState.Repaid == 2000 && advanceState.Remaining == 8000,
+                "company income changes do not affect employee advances or settlements");
+            Check(totalsAfterIncome.TotalPaid == reversedTotals.TotalPaid && totalsAfterIncome.TotalRemaining == reversedTotals.TotalRemaining,
+                "company income leaves advance totals unchanged");
+
             var custom = await fm.SaveAccountAsync(null, new("610999", "Test expense", "Test expense", "EXPENSE", "DEBIT", true, null, true, false), default);
             Check(accounts.All(x => x.Id != custom.Id), "custom chart account created");
             var trial = await fm.GetTrialBalanceAsync(today, default); Check(trial.TotalDebit == trial.TotalCredit, "trial balance remains balanced");
@@ -83,9 +245,28 @@ public sealed class AccountingBookIntegrationTests
             salary.ApplyComponents(20, 10, 5, 0, 0, null, now);
             db.AccountingPayrollPeriods.Add(payrollPeriod); db.AccountingEmployeePayrolls.Add(salary); await db.SaveChangesAsync();
             var accounting = new AccountingService(db, new BookTestPrincipal(maker.Id), null!, new HrAuditService(db, new BookTestPrincipal(maker.Id)), null!, bm);
-            await accounting.RecordPayrollAsync(salary.Id, new(20, 10, 5, 0, 0, "Confirmed components"), default);
+            var companyIncomeBeforePayrollEdit = (await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default)).CompanyIncome;
+            var editedPayroll = await accounting.UpdatePayrollAsync(salary.Id, new(30, 10, 5, 0, 0, "Edited before payment"), default);
+            Check(editedPayroll.NetSalary == 545 && (await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default)).CompanyIncome == companyIncomeBeforePayrollEdit,
+                "editing an unposted normal transaction has no duplicate or premature company income effect");
+            await accounting.RecordPayrollAsync(salary.Id, new(30, 10, 5, 0, 0, "Confirmed edited components"), default);
             var salaryEntry = await db.AccountingBookEntries.Include(x => x.JournalEntry).SingleAsync(x => x.SourceKey == $"PAYROLL:{salary.Id}");
-            Check(salary.Status == "PAID" && salaryEntry.JournalEntry.Status == "POSTED" && salaryEntry.Amount == 535, "actual payroll payment and journal persist together");
+            Check(salary.Status == "PAID" && salaryEntry.JournalEntry.Status == "POSTED" && salaryEntry.Amount == 545, "actual payroll payment and journal persist together");
+            Check((await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default)).CompanyIncome == companyIncomeBeforePayrollEdit - 545 &&
+                  await db.AccountingBookEntries.CountAsync(x => x.SourceKey == $"PAYROLL:{salary.Id}") == 1,
+                "edited payroll decreases company income once when paid");
+            var companyIncomeBeforeCancel = (await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default)).CompanyIncome;
+            var cancelledJournal = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                payrollPeriod.Id, null, "ACCOUNTING_OPERATION", today, today, "EGP", "Cancelled before posting", maker.Id, now);
+            cancelledJournal.AddLine(Account("610100"), 10, 0, 10, 0, 1, "Cancelled before posting");
+            cancelledJournal.AddLine(Account("110300"), 0, 10, 0, 10, 1, "Cancelled before posting");
+            var cancelledEntry = new AccountingBookEntry(Guid.NewGuid(), "OTHER", today, 10, Account("610100"), Account("110300"),
+                "Cancelled before posting", null, cancelledJournal.Id, maker.Id, now);
+            db.JournalEntries.Add(cancelledJournal); db.AccountingBookEntries.Add(cancelledEntry); await db.SaveChangesAsync();
+            await bm.TransitionAsync(cancelledEntry.Id, "cancel", "Not needed", default);
+            Check((await bm.SummaryAsync(new(today.Year, today.Month, 1), today, default)).CompanyIncome == companyIncomeBeforeCancel &&
+                  (await db.JournalEntries.SingleAsync(x => x.Id == cancelledJournal.Id)).Status == "CANCELLED",
+                "cancelling an unposted normal transaction has no company income effect");
             await Conflict(() => accounting.PayPayrollAsync(salary.Id, default), "paid salary cannot be paid twice");
             await Assert.ThrowsAsync<HrValidationException>(() => accounting.CreateTransportationAsync(new(employee.Id, today, 1.001m, "Invalid cents", null, null, null), default));
             await Conflict(() => accounting.CreateTransportationAsync(new(employee.Id, today, 25, "Same month transportation", null, null, null), default), "payroll transportation cannot be paid a second time separately");
@@ -220,6 +401,147 @@ public sealed class AccountingBookIntegrationTests
             await bm.DeleteAsync(partialPayment.Id, new(true, "Test cleanup"), default);
             await bm.DeleteAsync(detailedAdvance.Id, new(true, "Test cleanup"), default);
             await bm.DeleteAsync(secondAdvance.Id, new(true, "Test cleanup"), default);
+            var claimService = new FinanceClaimsService(db, new BookTestPrincipal(maker.Id), bm, fm);
+            var claimRangeFrom = new DateOnly(today.Year, today.Month, 1);
+            var incomeBeforeClaim = await bm.SummaryAsync(claimRangeFrom, today, default);
+            var profitLossBeforeClaim = await bm.ProfitLossAsync(claimRangeFrom, today, default);
+            var advancesBeforeClaim = (await bm.AdvancesAsync(today, null, null, default)).Sum(x => x.Remaining);
+            var claimInput = new SaveFinanceClaimRequest("CLAIM-1", null, "Example Bank", "Monthly", today.ToString("yyyy-MM"),
+                today, 100000m, 14m, 3m);
+            var pendingCancellation = await claimService.CreateAsync(claimInput with { Serial = "CLAIM-CANCEL" }, default);
+            await claimService.CancelAsync(pendingCancellation.Id, "Pending claim cancelled in integration test", default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome &&
+                  (await claimService.DetailsAsync(pendingCancellation.Id, default)).Claim.Status == "CANCELLED",
+                "cancelling a pending claim does not change Company Income");
+            var financialClaim = await claimService.CreateAsync(claimInput, default);
+            Check(financialClaim.Vat == 14000m && financialClaim.TotalWithVat == 114000m && financialClaim.TaxAtSource == 3000m && financialClaim.TotalInBank == 111000m,
+                "claim amounts are calculated from the pre-VAT base");
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "creating a pending claim does not change Company Income");
+            await claimService.UpdateAsync(financialClaim.Id, claimInput with { Month = "Edited month" }, default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "editing a pending claim does not change Company Income");
+            await claimService.ConfirmReceiptAsync(financialClaim.Id, new(today), default);
+            await claimService.ConfirmReceiptAsync(financialClaim.Id, new(today), default);
+            Check(await db.AccountingBookEntries.CountAsync(x => x.SourceKey != null && x.SourceKey.StartsWith($"CLAIM:{financialClaim.Id}:")) == 1,
+                "repeated claim receipt confirmation creates one accounting entry");
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome + 111000m,
+                "confirmed claim posts only net Total In Bank to Company Income");
+            var profitLossAfterClaimReceipt = await bm.ProfitLossAsync(claimRangeFrom, today, default);
+            Check(profitLossAfterClaimReceipt.TotalRevenue == profitLossBeforeClaim.TotalRevenue &&
+                  profitLossAfterClaimReceipt.TotalExpenses == profitLossBeforeClaim.TotalExpenses,
+                "claim receipt is not duplicated as profit and loss revenue");
+            Check((await bm.AdvancesAsync(today, null, null, default)).Sum(x => x.Remaining) == advancesBeforeClaim,
+                "claim receipt does not change employee advances");
+            await claimService.UpdateAsync(financialClaim.Id, claimInput with { Month = "Edited month", AmountWithoutVat = 90000m }, default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "editing a received claim reverses its prior posting before updating");
+            await claimService.ConfirmReceiptAsync(financialClaim.Id, new(today), default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome + 99900m &&
+                  await db.AccountingBookEntries.CountAsync(x => x.SourceKey != null && x.SourceKey.StartsWith($"CLAIM:{financialClaim.Id}:")) == 2,
+                "reconfirming an edited claim posts the revised net amount without deleting the original posting");
+            await claimService.ReverseReceiptAsync(financialClaim.Id, new("Integration test reversal"), default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "claim receipt reversal removes its Company Income effect exactly once");
+            await Conflict(() => claimService.ReverseReceiptAsync(financialClaim.Id, new("Duplicate reversal"), default),
+                "a claim receipt cannot be reversed twice");
+            var profitLossAfterClaimReversal = await bm.ProfitLossAsync(claimRangeFrom, today, default);
+            Check(profitLossAfterClaimReversal.TotalRevenue == profitLossBeforeClaim.TotalRevenue &&
+                  profitLossAfterClaimReversal.TotalExpenses == profitLossBeforeClaim.TotalExpenses,
+                "claim receipt reversals leave profit and loss unchanged");
+
+            using var claimsWorkbook = new XLWorkbook();
+            var claimSheet = claimsWorkbook.Worksheets.Add("Claims");
+            var claimHeaders = new[] { "S", "Bank Name", "The type of Claim", "Month", "Date of claim", "total claim without vat", "Vat%", "Vat", "total claim with vat", "Tax at source %", "Tax at source", "Total", "Total in bank", "Date In Bank" };
+            for (var index = 0; index < claimHeaders.Length; index++) claimSheet.Cell(1, index + 1).Value = claimHeaders[index];
+            object?[] claimValues = ["HIST-1", "Example Bank", "Historical", today.ToString("yyyy-MM"), today.ToDateTime(TimeOnly.MinValue), 1000d, 14d, 140d, 1140d, 3d, 30d, 1110d, 1111d, today.ToDateTime(TimeOnly.MinValue)];
+            for (var index = 0; index < claimValues.Length; index++) claimSheet.Cell(2, index + 1).Value = XLCellValue.FromObject(claimValues[index]);
+            using var claimsWorkbookStream = new MemoryStream(); claimsWorkbook.SaveAs(claimsWorkbookStream); claimsWorkbookStream.Position = 0;
+            var claimPreview = await claimService.PreviewImportAsync("claims.xlsx", claimsWorkbookStream, default);
+            Check(claimPreview.ValidRows == 1 && claimPreview.Rows.Single().CalculatedTotalInBank == 1110m &&
+                  claimPreview.Rows.Single().Warnings.Count > 0,
+                "Claims Excel preview validates and recalculates net bank amount");
+            var claimImport = await claimService.ConfirmImportAsync(new(claimPreview.PreviewId), default);
+            Check(claimImport.Imported == 1, "Claims Excel import stores the valid historical row");
+            var historicalClaim = await db.FinanceClaims.SingleAsync(x => x.Serial == "HIST-1");
+            Check(historicalClaim.Status == "RECEIVED" && !await db.AccountingBookEntries.AnyAsync(x => x.SourceKey != null && x.SourceKey.StartsWith($"CLAIM:{historicalClaim.Id}:")),
+                "historical imported bank receipt is not silently posted");
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "historical imported receipt leaves Company Income unchanged");
+            var profitLossBeforeHistoricalClaim = await bm.ProfitLossAsync(claimRangeFrom, today, default);
+            await claimService.PostHistoricalReceiptAsync(historicalClaim.Id, default);
+            await claimService.PostHistoricalReceiptAsync(historicalClaim.Id, default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome + 1110m,
+                "explicit historical posting is idempotent and uses the recalculated net amount");
+            var profitLossAfterHistoricalClaim = await bm.ProfitLossAsync(claimRangeFrom, today, default);
+            Check(profitLossAfterHistoricalClaim.TotalRevenue == profitLossBeforeHistoricalClaim.TotalRevenue &&
+                  profitLossAfterHistoricalClaim.TotalExpenses == profitLossBeforeHistoricalClaim.TotalExpenses,
+                "historical claim posting does not create profit and loss revenue");
+            await claimService.ReverseReceiptAsync(historicalClaim.Id, new("Historical test reversal"), default);
+            Check((await bm.SummaryAsync(claimRangeFrom, today, default)).CompanyIncome == incomeBeforeClaim.CompanyIncome,
+                "reversing explicit historical posting restores Company Income");
+            Check((await bm.AdvancesAsync(today, null, null, default)).Sum(x => x.Remaining) == advancesBeforeClaim,
+                "historical claim posting and reversal leave advances unchanged");
+            using (var claimsExport = new XLWorkbook(new MemoryStream(await claimService.ExportAsync(new FinanceClaimFilter(), default))))
+                Check(claimsExport.Worksheets.Single().ColumnsUsed().Count() == 14,
+                    "Claims Excel export contains exactly the fourteen business columns");
+            var reportFrom = new DateOnly(today.Year, today.Month, 1);
+            var profitLossBaseline = await bm.ProfitLossAsync(reportFrom, today, default);
+            var profitIncome = await Create("REVENUE", 100000m); await Post(profitIncome);
+            var profitExpense = await Create("PETTY", 40000m); await Post(profitExpense);
+            var profitResult = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(profitResult.TotalRevenue - profitLossBaseline.TotalRevenue == 100000m &&
+                  profitResult.TotalExpenses - profitLossBaseline.TotalExpenses == 40000m &&
+                  profitResult.NetProfitLoss - profitLossBaseline.NetProfitLoss == 60000m,
+                "profit and loss reports a 100000 revenue less 40000 expense as 60000 net profit");
+            var lossRevenue = await Create("REVENUE", 50000m); await Post(lossRevenue);
+            var lossExpense = await Create("OTHER", 80000m); await Post(lossExpense);
+            var lossResult = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(lossResult.TotalRevenue - profitResult.TotalRevenue == 50000m &&
+                  lossResult.TotalExpenses - profitResult.TotalExpenses == 80000m &&
+                  lossResult.NetProfitLoss - profitResult.NetProfitLoss == -30000m,
+                "profit and loss reports a 50000 revenue less 80000 expense as a 30000 net loss");
+            Check(lossResult.RevenueCategories.Single(x => x.Category == "REVENUE").Transactions.Count(x => x.JournalNumber == profitIncome.JournalNumber) == 1,
+                "a posted revenue journal is counted exactly once");
+            await fr.ReverseJournalAsync(lossExpense.JournalEntryId, new("P&L test reversal"), default);
+            var reversedLoss = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(lossResult.TotalExpenses - reversedLoss.TotalExpenses == 80000m,
+                "reversing a posted expense removes its profit and loss effect");
+            var canceledJournal = new JournalEntry(MIS.Infrastructure.Persistence.Configurations.FinanceSeed.LegalEntityId,
+                (await fm.GetPeriodsAsync(today.Year, default)).Single(x => x.PeriodNumber == today.Month).Id, null, "MANUAL",
+                today, today, "EGP", "Cancelled P&L test", maker.Id, now);
+            canceledJournal.AddLine(Account("110300"), 123m, 0, 123m, 0, 1, "Cancelled P&L test");
+            canceledJournal.AddLine(Account("410100"), 0, 123m, 0, 123m, 1, "Cancelled P&L test");
+            canceledJournal.Cancel(); db.JournalEntries.Add(canceledJournal); await db.SaveChangesAsync();
+            var afterCancellation = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(afterCancellation.TotalRevenue == reversedLoss.TotalRevenue && afterCancellation.TotalExpenses == reversedLoss.TotalExpenses,
+                "cancelled journals do not affect profit and loss");
+            var outsideDate = reportFrom.AddDays(-1);
+            var previousPeriodRevenue = await Create("REVENUE", 700m, outsideDate); await Post(previousPeriodRevenue);
+            var currentRangeAfterPriorRevenue = await bm.ProfitLossAsync(reportFrom, today, default);
+            var priorDayReport = await bm.ProfitLossAsync(outsideDate, outsideDate, default);
+            Check(currentRangeAfterPriorRevenue.TotalRevenue == afterCancellation.TotalRevenue &&
+                  priorDayReport.TotalRevenue == 700m && priorDayReport.TotalExpenses == 0,
+                "profit and loss date filters include only posted transactions in the selected range");
+            var beforeCashReceipt = await bm.ProfitLossAsync(reportFrom, today, default);
+            var pAndLCashReceipt = await Create("INCOME", 250000m); await Post(pAndLCashReceipt);
+            var afterCashReceipt = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(afterCashReceipt.TotalRevenue == beforeCashReceipt.TotalRevenue &&
+                  afterCashReceipt.TotalExpenses == beforeCashReceipt.TotalExpenses &&
+                  afterCashReceipt.NetProfitLoss == beforeCashReceipt.NetProfitLoss,
+                "Company Income cash movements do not affect profit and loss");
+            var beforeAdvance = await bm.ProfitLossAsync(reportFrom, today, default);
+            var pAndLAdvance = await Create("ADVANCE", 500m); await Post(pAndLAdvance);
+            var afterAdvance = await bm.ProfitLossAsync(reportFrom, today, default);
+            var pAndLRepayment = await Create("ADVANCE_REPAYMENT", 200m, related: pAndLAdvance.Id); await Post(pAndLRepayment);
+            var afterRepayment = await bm.ProfitLossAsync(reportFrom, today, default);
+            Check(afterAdvance.TotalRevenue == beforeAdvance.TotalRevenue && afterAdvance.TotalExpenses == beforeAdvance.TotalExpenses &&
+                  afterRepayment.TotalRevenue == beforeAdvance.TotalRevenue && afterRepayment.TotalExpenses == beforeAdvance.TotalExpenses,
+                "employee advance creation and repayment do not affect profit and loss");
+            using (var profitLossExport = new XLWorkbook(new MemoryStream(await bm.ExportAsync("profit-loss", new(From: reportFrom, To: today), default))))
+                Check(profitLossExport.Worksheets.Count == 2 && profitLossExport.Worksheets.First().RowsUsed().Count() == 8 &&
+                      profitLossExport.Worksheets.Last().Cell(6, 1).GetString() is "Type" or "النوع",
+                    "profit and loss Excel export contains summary and transaction detail sheets");
             var period = (await fm.GetPeriodsAsync(today.Year, default)).Single(x => x.PeriodNumber == today.Month);
             await fm.ChangePeriodStatusAsync(period.Id, "soft-close", new("Isolated test"), default);
             await Conflict(() => accounting.PayPayrollAsync(salary2.Id, default), "closed accounting period blocks payroll payment");

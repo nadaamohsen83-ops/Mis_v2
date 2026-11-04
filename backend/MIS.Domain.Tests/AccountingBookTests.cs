@@ -27,6 +27,8 @@ public sealed class AccountingBookTests
         entry.RecordConfirmedAccounting("ACC-TEST", maker, now);
         Assert.Equal("POSTED", entry.Status); Assert.Equal(maker, entry.PostedById);
         Assert.Throws<InvalidOperationException>(() => entry.RecordConfirmedAccounting("DUPLICATE", maker, now));
+        var companyIncome = Journal("COMPANY_INCOME"); companyIncome.RecordConfirmedAccounting("ACC-INCOME", maker, now);
+        var revenue = Journal("REVENUE"); revenue.RecordConfirmedAccounting("ACC-REVENUE", maker, now);
         var manual = Journal("MANUAL"); manual.Submit();
         Assert.Throws<InvalidOperationException>(() => manual.Approve(maker, now));
         Assert.Throws<InvalidOperationException>(() => Journal("COLLECTION").RecordConfirmedAccounting("ACC-TEST", maker, now));
@@ -82,6 +84,7 @@ public sealed class AccountingBookTests
         Assert.Throws<ArgumentException>(() => Entry("ADVANCE")); Assert.Throws<ArgumentException>(() => Entry("CARRIED_ADVANCE"));
         Assert.Throws<ArgumentException>(() => Entry("ADVANCE_REPAYMENT", employee: Guid.NewGuid()));
         Assert.NotNull(Entry("ADVANCE_REPAYMENT", employee: Guid.NewGuid(), related: Guid.NewGuid()));
+        Assert.Throws<ArgumentException>(() => Entry("INCOME", related: Guid.NewGuid()));
     }
     [Fact]
     public void OpeningAdvances_DoNotCreateCashFlowOrExpense()
@@ -90,6 +93,45 @@ public sealed class AccountingBookTests
         Assert.Equal("OPENING_ADVANCE", AccountingBookValues.Direction("CARRIED_ADVANCE"));
         Assert.Equal("ASSET", AccountingBookValues.AccountType("ADVANCE_REPAYMENT"));
         Assert.Equal("ADVANCE_REPAYMENT", AccountingBookValues.Direction("ADVANCE_REPAYMENT"));
+    }
+    [Fact]
+    public void CompanyIncomeAndRevenueUseIndependentCategoriesAndAccounts()
+    {
+        Assert.Equal("COMPANY_INCOME", AccountingBookValues.Direction("INCOME"));
+        Assert.Equal("LIABILITY", AccountingBookValues.AccountType("INCOME"));
+        Assert.Equal("210300", AccountingBookValues.AccountCode("INCOME"));
+        Assert.Equal("REVENUE", AccountingBookValues.Direction("REVENUE"));
+        Assert.Equal("REVENUE", AccountingBookValues.AccountType("REVENUE"));
+        Assert.Equal("410100", AccountingBookValues.AccountCode("REVENUE"));
+        Assert.True(AccountingBookValues.IsCashIn("INCOME"));
+        Assert.True(AccountingBookValues.IsCashIn("REVENUE"));
+    }
+    [Fact]
+    public void CompanyIncomeIncludesNormalInflowsAndOutflowsButExcludesAdvances()
+    {
+        var excluded = new[] { "ADVANCE", "CARRIED_ADVANCE", "ADVANCE_REPAYMENT" };
+        foreach (var category in AccountingBookValues.Categories)
+        {
+            var expected = excluded.Contains(category) ? 0 : category is "INCOME" or "REVENUE" ? 1 : -1;
+            Assert.Equal(expected, AccountingBookValues.CompanyIncomeSign(category));
+        }
+    }
+    [Fact]
+    public void Claims_RecalculateAmountsFromPreVatBaseAndDoNotPostOnCreation()
+    {
+        var claim = new FinanceClaim(null, null, "Example Bank", "Monthly", "2026-10", new(2026, 10, 1),
+            100000m, 14m, 3m, new(2026, 10, 15), false, null, Guid.NewGuid(), DateTimeOffset.UtcNow);
+        Assert.Equal(14000m, claim.Vat);
+        Assert.Equal(114000m, claim.TotalWithVat);
+        Assert.Equal(3000m, claim.TaxAtSource);
+        Assert.Equal(111000m, claim.Total);
+        Assert.Equal(111000m, claim.TotalInBank);
+        Assert.Equal("PENDING", claim.Status);
+
+        var historical = new FinanceClaim(null, null, "Example Bank", "Monthly", "2026-10", new(2026, 10, 1),
+            100000m, 14m, 3m, new(2026, 10, 15), true, Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow);
+        Assert.Equal("RECEIVED", historical.Status);
+        Assert.True(historical.IsHistoricalImport);
     }
     [Theory]
     [InlineData("ar-EG")]

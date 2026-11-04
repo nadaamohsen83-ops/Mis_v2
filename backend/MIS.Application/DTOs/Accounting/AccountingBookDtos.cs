@@ -14,13 +14,24 @@ public sealed record CreateAccountingBookEntryRequest(
     [MaxLength(160)] string? Reference, Guid? EmployeeId = null, Guid? RelatedAdvanceId = null, Guid? RequestId = null,
     [MaxLength(80)] string? PaymentMethod = null, [MaxLength(1000)] string? Notes = null);
 public sealed record AccountingBookCategoryTotalDto(string Category, decimal Amount, int Count);
-public sealed record AccountingBookSummaryDto(DateOnly From, DateOnly To, decimal Income, decimal Expenses, decimal AdvancesIssued, decimal AdvanceRepayments, decimal CashIn, decimal CashOut, decimal NetCashFlow, decimal PendingAmount, int PendingCount, decimal OutstandingAdvances, decimal CarriedAdvances, int LegacyPaidCount, IReadOnlyList<AccountingBookCategoryTotalDto> Categories);
+public sealed record AccountingBookSummaryDto(DateOnly From, DateOnly To, decimal CompanyIncome, decimal Revenue, decimal Expenses, decimal AdvancesIssued, decimal AdvanceRepayments, decimal CashIn, decimal CashOut, decimal NetCashFlow, decimal PendingAmount, int PendingCount, decimal OutstandingAdvances, decimal CarriedAdvances, int LegacyPaidCount, IReadOnlyList<AccountingBookCategoryTotalDto> Categories);
+/// <summary>Profit and loss totals and category details calculated from posted revenue and expense journal lines.</summary>
+public sealed record AccountingProfitLossDto(
+    DateOnly From, DateOnly To, decimal TotalRevenue, decimal TotalExpenses, decimal NetProfitLoss,
+    IReadOnlyList<AccountingProfitLossCategoryDto> RevenueCategories,
+    IReadOnlyList<AccountingProfitLossCategoryDto> ExpenseCategories);
+/// <summary>A revenue or expense category and its selected-period transactions.</summary>
+public sealed record AccountingProfitLossCategoryDto(
+    string Category, decimal Amount, IReadOnlyList<AccountingProfitLossTransactionDto> Transactions);
+/// <summary>A posted journal movement contributing to a profit and loss category.</summary>
+public sealed record AccountingProfitLossTransactionDto(
+    DateOnly Date, string? JournalNumber, string Description, decimal Amount);
 public sealed record AccountingAdvancesFilter(DateOnly? From = null, DateOnly? To = null, string? EmployeeName = null, string? EmployeeNumber = null, Guid? DepartmentId = null, string? Status = null, Guid? EmployeeId = null);
 public sealed record AccountingAdvancesResultDto(IReadOnlyList<AccountingAdvanceDto> Items, decimal TotalAmount, decimal TotalPaid, decimal TotalRemaining, int OpenCount);
 public sealed record AccountingAdvanceDto(Guid Id, string DocumentNumber, Guid EmployeeId, string EmployeeNumber, string EmployeeName, string? DepartmentName, Guid? DepartmentId,
     DateOnly Date, decimal Amount, decimal Repaid, decimal Remaining, string Reason, string? PaymentMethod, string? Reference, string? Notes,
     string Status, Guid JournalEntryId, Guid AccountId, string CreatedBy, DateTimeOffset CreatedAt, bool Carried);
-public sealed record AccountingAdvancePaymentDto(Guid Id, DateOnly Date, decimal Amount, string? PaymentMethod, string? Reference, string? Notes,
+public sealed record AccountingAdvancePaymentDto(Guid Id, DateOnly Date, decimal Amount, string Status, string? PaymentMethod, string? Reference, string? Notes,
     string CreatedBy, DateTimeOffset CreatedAt, decimal RemainingAfter);
 public sealed record AccountingAdvanceDetailsDto(AccountingAdvanceDto Advance, decimal EmployeeTotalOutstanding, IReadOnlyList<AccountingAdvancePaymentDto> Payments);
 public sealed record AccountingRecurringExpenseDto(Guid Id, string Name, decimal Amount, int DueDay, Guid AccountId, Guid CashAccountId, DateOnly StartsOn, DateOnly? EndsOn, string? Notes, bool IsActive);

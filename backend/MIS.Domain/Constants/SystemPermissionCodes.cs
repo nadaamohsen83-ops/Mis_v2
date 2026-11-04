@@ -29,6 +29,14 @@ public static class SystemPermissionCodes
     public const string FinanceCollectionReview = "finance.collection.review";
     public const string FinanceCustodyView = "finance.custody.view";
     public const string FinanceCustodyReconcile = "finance.custody.reconcile";
+    public const string FinanceClaimsView = "finance.claims.view";
+    public const string FinanceClaimsCreate = "finance.claims.create";
+    public const string FinanceClaimsEdit = "finance.claims.edit";
+    public const string FinanceClaimsImport = "finance.claims.import";
+    public const string FinanceClaimsConfirmReceipt = "finance.claims.receipt.confirm";
+    public const string FinanceClaimsReverseReceipt = "finance.claims.receipt.reverse";
+    public const string FinanceClaimsCancel = "finance.claims.cancel";
+    public const string FinanceClaimsExport = "finance.claims.export";
     public const string AccountingAccess = "accounting.access";
     public const string AccountingPayrollManage = "accounting.payroll.manage";
     public const string AccountingPayrollApprove = "accounting.payroll.approve";

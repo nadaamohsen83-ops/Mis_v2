@@ -6,10 +6,12 @@ public interface IAccountingBookService
 {
     Task<AccountingBookPageDto> ListAsync(AccountingBookFilter filter, CancellationToken token);
     Task<AccountingBookEntryDto> CreateAsync(CreateAccountingBookEntryRequest request, CancellationToken token);
+    Task<AccountingBookEntryDto> RecordClaimReceiptAsync(Guid claimId, Guid receiptPostingId, DateOnly receiptDate, decimal amount, CancellationToken token);
     Task<AccountingBookEntryDto> TransitionAsync(Guid id, string action, string? reason, CancellationToken token);
     Task DeleteAsync(Guid id, ConfirmAccountingDeletionRequest request, CancellationToken token);
     Task DeleteSourceAsync(string kind, Guid id, ConfirmAccountingDeletionRequest request, CancellationToken token);
     Task<AccountingBookSummaryDto> SummaryAsync(DateOnly from, DateOnly to, CancellationToken token);
+    Task<AccountingProfitLossDto> ProfitLossAsync(DateOnly from, DateOnly to, CancellationToken token);
     Task<AccountingAdvancesResultDto> AdvancesAsync(AccountingAdvancesFilter filter, CancellationToken token);
     Task<AccountingAdvanceDetailsDto> AdvanceDetailsAsync(Guid id, CancellationToken token);
     Task<IReadOnlyList<AccountingRecurringExpenseDto>> RecurringAsync(CancellationToken token);

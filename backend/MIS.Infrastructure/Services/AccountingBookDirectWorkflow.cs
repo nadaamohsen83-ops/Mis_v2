@@ -36,7 +36,9 @@ public sealed partial class AccountingBookService
     }
     private async Task DeleteEntry(AccountingBookEntry entry, string? reason, CancellationToken token)
     {
-        if (AccountingBookValues.IsAdvance(entry.Category) && await db.AccountingBookEntries.AnyAsync(x => x.RelatedAdvanceId == entry.Id && x.DeletedAt == null && x.JournalEntry.Status != "CANCELLED" && x.JournalEntry.Status != "REVERSED", token))
+        if (entry.SourceKey?.StartsWith("CLAIM:", StringComparison.Ordinal) == true)
+            throw new HrConflictException("Claim receipt entries must be reversed from the Claims workflow.");
+        if (AccountingBookValues.IsAdvance(entry.Category) && await db.AccountingBookEntries.AnyAsync(x => x.Category == "ADVANCE_REPAYMENT" && x.RelatedAdvanceId == entry.Id && x.DeletedAt == null && x.JournalEntry.Status != "CANCELLED" && x.JournalEntry.Status != "REVERSED", token))
             throw new HrConflictException("Delete the advance repayments before deleting the original advance.");
         var original = entry.JournalEntry; Guid? reversalId = null;
         if (original.Status == "POSTED")

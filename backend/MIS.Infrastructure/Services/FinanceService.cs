@@ -119,7 +119,7 @@ public sealed class FinanceService : IFinanceService, IFinancePostingService
             {
                 var advance = await _db.AccountingBookEntries.AsNoTracking().Include(x => x.JournalEntry).SingleOrDefaultAsync(x => x.Id == operation.RelatedAdvanceId, token);
                 if (advance is null || advance.JournalEntry.Status != "POSTED" || advance.EmployeeId != operation.EmployeeId || advance.AccountId != operation.AccountId || advance.TransactionDate > operation.TransactionDate) throw new HrConflictException("The original advance is no longer eligible for this repayment.");
-                var repaid = await _db.AccountingBookEntries.Where(x => x.RelatedAdvanceId == advance.Id && x.Id != operation.Id && x.JournalEntry.Status == "POSTED").SumAsync(x => (decimal?)x.Amount, token) ?? 0;
+                var repaid = await _db.AccountingBookEntries.Where(x => x.Category == "ADVANCE_REPAYMENT" && x.RelatedAdvanceId == advance.Id && x.Id != operation.Id && x.JournalEntry.Status == "POSTED").SumAsync(x => (decimal?)x.Amount, token) ?? 0;
                 if (operation.Amount > advance.Amount - repaid) throw new HrConflictException("Repayment exceeds the outstanding advance balance.");
             }
         }
@@ -132,10 +132,30 @@ public sealed class FinanceService : IFinanceService, IFinancePostingService
     public async Task<JournalDto> ReverseJournalAsync(Guid id, PeriodActionRequest request, CancellationToken token)
     {
         EnsurePermission(SystemPermissionCodes.FinanceTransactionReverse);
+        return await ReverseJournalCoreAsync(id, request, false, token);
+    }
+
+    public async Task<JournalDto> ReverseClaimReceiptAsync(Guid id, PeriodActionRequest request, CancellationToken token)
+    {
+        EnsureAccess();
+        if (!_user.Roles.Contains(SystemRoleNames.Admin) && !_user.Permissions.Contains("*") &&
+            !_user.Permissions.Contains(SystemPermissionCodes.FinanceClaimsReverseReceipt) &&
+            !_user.Permissions.Contains(SystemPermissionCodes.FinanceClaimsEdit) &&
+            !_user.Permissions.Contains(SystemPermissionCodes.FinanceClaimsCancel))
+            throw new HrForbiddenException("Claim receipt reversal permission is required.");
+        if (!await _db.AccountingBookEntries.AnyAsync(x => x.JournalEntryId == id && x.SourceKey != null && x.SourceKey.StartsWith("CLAIM:"), token))
+            throw new HrConflictException("Only a claim receipt can be reversed through the Claims workflow.");
+        return await ReverseJournalCoreAsync(id, request, true, token);
+    }
+
+    private async Task<JournalDto> ReverseJournalCoreAsync(Guid id, PeriodActionRequest request, bool claimReceipt, CancellationToken token)
+    {
         await using var tx = _db.Database.CurrentTransaction is null ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token) : null;
-        if (await _db.AccountingBookEntries.AnyAsync(a => a.JournalEntryId == id && (a.Category == "ADVANCE" || a.Category == "CARRIED_ADVANCE") && _db.AccountingBookEntries.Any(r => r.RelatedAdvanceId == a.Id && r.JournalEntry.Status == "POSTED"), token))
+        if (await _db.AccountingBookEntries.AnyAsync(a => a.JournalEntryId == id && (a.Category == "ADVANCE" || a.Category == "CARRIED_ADVANCE") && _db.AccountingBookEntries.Any(r => r.Category == "ADVANCE_REPAYMENT" && r.RelatedAdvanceId == a.Id && r.JournalEntry.Status == "POSTED"), token))
             throw new HrConflictException("Reverse the advance repayments before reversing the original advance.");
-        if (await _db.AccountingBookEntries.AnyAsync(a => a.JournalEntryId == id && a.SourceKey != null && !a.SourceKey.StartsWith("MANUAL:") && !a.SourceKey.StartsWith("RECURRING:"), token))
+        if (await _db.AccountingBookEntries.AnyAsync(a => a.JournalEntryId == id && a.SourceKey != null &&
+            !a.SourceKey.StartsWith("MANUAL:") && !a.SourceKey.StartsWith("RECURRING:") &&
+            !(claimReceipt && a.SourceKey.StartsWith("CLAIM:")), token))
             throw new HrConflictException("Paid payroll and commission journals must be corrected through an approved adjustment rather than reversing the linked payment alone.");
         if (await _db.CollectionFinancialReceipts.AnyAsync(x => x.JournalEntryId == id || x.ClearingJournalEntryId == id, token))
             throw new HrConflictException("Collection journals must be reversed from the financial collection screen to keep the receipt, case balance, client ledger, and custody synchronized.");

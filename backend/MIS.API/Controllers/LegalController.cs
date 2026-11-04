@@ -10,11 +10,80 @@ namespace MIS.API.Controllers;
 [ApiController]
 [Route("api/legal")]
 [Authorize]
-public sealed class LegalController(ILegalService legal, ILegalCaseImportService imports) : ControllerBase
+public sealed class LegalController(
+    ILegalService legal,
+    ILegalClientService clients,
+    ILegalCaseImportService imports) : ControllerBase
 {
     [HttpGet("dashboard")]
     [Authorize(Policy = AuthorizationPolicies.LegalAccess)]
-    public Task<LegalDashboardDto> Dashboard(CancellationToken token) => legal.GetDashboardAsync(token);
+    public Task<LegalClientDashboardDto> Dashboard(CancellationToken token) => clients.GetDashboardAsync(token);
+
+    [HttpGet("clients")]
+    [Authorize(Policy = AuthorizationPolicies.LegalAccess)]
+    public Task<LegalClientPageDto> Clients(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken token = default) => clients.ListAsync(search, page, pageSize, token);
+
+    [HttpGet("clients/{customerId:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.LegalAccess)]
+    public Task<LegalClientDetailsDto> Client(Guid customerId, CancellationToken token) => clients.GetAsync(customerId, token);
+
+    [HttpPut("clients/{customerId:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public Task<LegalClientDetailsDto> UpdateClient(
+        Guid customerId,
+        [FromBody] UpdateLegalClientRequest request,
+        CancellationToken token) => clients.UpdateAsync(customerId, request, token);
+
+    [HttpPost("clients/{customerId:guid}/documents")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(11 * 1024 * 1024)]
+    public async Task<LegalClientDocumentDto> UploadClientDocument(
+        Guid customerId,
+        IFormFile file,
+        CancellationToken token)
+    {
+        if (file is null) throw new HrValidationException("Select a client document.");
+        await using var stream = file.OpenReadStream();
+        return await clients.UploadDocumentAsync(customerId, file.FileName, file.ContentType, file.Length, stream, token);
+    }
+
+    [HttpGet("client-documents/{documentId:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.LegalAccess)]
+    public async Task<IActionResult> DownloadClientDocument(Guid documentId, CancellationToken token)
+    {
+        var document = await clients.DownloadDocumentAsync(documentId, token);
+        return File(document.Content, document.ContentType, document.FileName);
+    }
+
+    [HttpDelete("client-documents/{documentId:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public async Task<IActionResult> DeleteClientDocument(Guid documentId, CancellationToken token)
+    {
+        await clients.DeleteDocumentAsync(documentId, token);
+        return NoContent();
+    }
+
+    [HttpPost("client-imports/preview")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(ExcelImportLimits.RequestBytes)]
+    public async Task<LegalClientImportPreviewDto> PreviewClientImport(IFormFile file, CancellationToken token)
+    {
+        if (file is null) throw new HrValidationException("Select a client import file.");
+        await using var stream = file.OpenReadStream();
+        return await clients.PreviewImportAsync(file.FileName, file.Length, stream, token);
+    }
+
+    [HttpPost("client-imports")]
+    [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
+    public Task<LegalClientImportResultDto> ImportClients(
+        [FromBody] LegalClientImportRequest request,
+        CancellationToken token) => clients.ImportAsync(request, token);
 
     [HttpGet("organizations")]
     [Authorize(Policy = AuthorizationPolicies.LegalAccess)]

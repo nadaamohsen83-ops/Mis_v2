@@ -16,6 +16,7 @@ public sealed class AccountingBookEntry
         if (accountId == counterAccountId) throw new ArgumentException("Choose two different accounts.");
         if (AccountingBookValues.IsAdvance(category) && employeeId is null) throw new ArgumentException("An employee is required for an advance.");
         if (category == "ADVANCE_REPAYMENT" && relatedAdvanceId is null) throw new ArgumentException("An original advance is required.");
+        if (relatedAdvanceId.HasValue && category != "ADVANCE_REPAYMENT") throw new ArgumentException("Only an advance repayment can reference an original advance.");
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
         Id = id; Category = category; TransactionDate = date; Amount = amount; AccountId = accountId; CounterAccountId = counterAccountId;
         Description = description.Trim(); Reference = string.IsNullOrWhiteSpace(reference) ? null : reference.Trim(); JournalEntryId = journalId;

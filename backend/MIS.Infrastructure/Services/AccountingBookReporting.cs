@@ -67,14 +67,14 @@ public sealed partial class AccountingBookService
         EnsureAccess(); CheckDates(from, to);
         var totals = AccountingBookValues.Categories.ToDictionary(x => x, _ => (Amount: 0m, Count: 0));
         void Add(string category, decimal amount) { var old = totals[category]; totals[category] = (old.Amount + amount, old.Count + 1); }
-        decimal expenses = 0, income = 0, advances = 0, repayments = 0;
+        decimal expenses = 0, companyIncome = 0, revenue = 0, advances = 0, repayments = 0;
         void Include(AccountingBookEntry entry, int sign)
         {
             Add(entry.Category, sign * entry.Amount);
             switch (AccountingBookValues.Direction(entry.Category))
             {
                 case "EXPENSE": expenses += sign * entry.Amount; break;
-                case "INCOME": income += sign * entry.Amount; break;
+                case "REVENUE": revenue += sign * entry.Amount; break;
                 case "ADVANCE": advances += sign * entry.Amount; break;
                 case "ADVANCE_REPAYMENT": repayments += sign * entry.Amount; break;
             }
@@ -92,6 +92,19 @@ public sealed partial class AccountingBookService
         var reversedIds = await db.JournalEntries.Where(x => x.ReversalOfJournalId != null && (x.Status == "POSTED" || x.Status == "REVERSED") && x.PostingDate >= from && x.PostingDate <= to).Select(x => x.ReversalOfJournalId!.Value).ToArrayAsync(token);
         foreach (var entry in await financialEntries.Where(x => reversedIds.Contains(x.JournalEntryId)).ToListAsync(token)) Include(entry, -1);
 
+        var balanceBookEntries = db.AccountingBookEntries.AsNoTracking()
+            .Where(e => e.DeletedAt == null || !db.JournalEntries.Any(r => r.ReversalOfJournalId == e.JournalEntryId && r.EntryType == "ACCOUNTING_DELETE"));
+        var balanceEntries = await balanceBookEntries
+            .Where(x => (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED") && x.JournalEntry.PostingDate <= to)
+            .GroupBy(x => x.Category).Select(g => new { Category = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(token);
+        companyIncome = balanceEntries.Sum(x => x.Amount * AccountingBookValues.CompanyIncomeSign(x.Category));
+        var balanceReversedIds = await db.JournalEntries.Where(x => x.ReversalOfJournalId != null &&
+                (x.Status == "POSTED" || x.Status == "REVERSED") && x.PostingDate <= to)
+            .Select(x => x.ReversalOfJournalId!.Value).ToArrayAsync(token);
+        var balanceReversedEntries = await balanceBookEntries.Where(x => balanceReversedIds.Contains(x.JournalEntryId))
+            .GroupBy(x => x.Category).Select(g => new { Category = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(token);
+        companyIncome -= balanceReversedEntries.Sum(x => x.Amount * AccountingBookValues.CompanyIncomeSign(x.Category));
+
         var legacy = await LegacyExpenses(from, to, token);
         foreach (var entry in legacy)
         {
@@ -102,14 +115,34 @@ public sealed partial class AccountingBookService
         }
         var otherLines = db.JournalEntryLines.AsNoTracking().Where(x => (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED") && x.JournalEntry.PostingDate >= from && x.JournalEntry.PostingDate <= to
             && !db.AccountingBookEntries.Any(e => e.JournalEntryId == x.JournalEntryId || e.JournalEntryId == x.JournalEntry.ReversalOfJournalId));
+        var normalJournalTypes = new[] { "MANUAL", "ACCOUNTING_OPERATION", "COMPANY_INCOME", "REVENUE", "ACCOUNTING_PAYMENT" };
+        var balanceOtherLines = db.JournalEntryLines.AsNoTracking().Where(x =>
+            (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED") && x.JournalEntry.PostingDate <= to &&
+            !db.AccountingBookEntries.Any(e => e.JournalEntryId == x.JournalEntryId || e.JournalEntryId == x.JournalEntry.ReversalOfJournalId));
         var otherCosts = await otherLines.Where(x => x.Account.AccountType == "EXPENSE" || x.Account.AccountType == "REVENUE")
             .GroupBy(x => new { x.Account.Code, x.Account.AccountType }).Select(g => new { g.Key.Code, g.Key.AccountType, Amount = g.Sum(x => x.BaseDebit - x.BaseCredit), Count = g.Count() }).ToListAsync(token);
         foreach (var group in otherCosts)
         {
-            var category = group.AccountType == "REVENUE" ? "INCOME" : AccountingBookValues.Categories.FirstOrDefault(x => AccountingBookValues.AccountCode(x) == group.Code && AccountingBookValues.AccountType(x) == "EXPENSE") ?? "OTHER";
+            var category = group.AccountType == "REVENUE" ? "REVENUE" : AccountingBookValues.Categories.FirstOrDefault(x => AccountingBookValues.AccountCode(x) == group.Code && AccountingBookValues.AccountType(x) == "EXPENSE") ?? "OTHER";
             var amount = group.AccountType == "REVENUE" ? -group.Amount : group.Amount;
-            Add(category, amount); if (group.AccountType == "REVENUE") income += amount; else expenses += amount;
+            Add(category, amount);
+            if (group.AccountType == "REVENUE") revenue += amount;
+            else expenses += amount;
         }
+        var manualMovements = await balanceOtherLines.Where(x => normalJournalTypes.Contains(x.JournalEntry.EntryType) ||
+                (x.JournalEntry.EntryType == "REVERSAL" || x.JournalEntry.EntryType == "ACCOUNTING_DELETE") &&
+                db.JournalEntries.Any(original => original.Id == x.JournalEntry.ReversalOfJournalId && normalJournalTypes.Contains(original.EntryType)))
+            .GroupBy(x => x.JournalEntryId)
+            .Select(g => new
+            {
+                HasCashMovement = g.Any(x => x.Account.IsCashAccount),
+                CashMovement = g.Where(x => x.Account.IsCashAccount).Sum(x => x.BaseDebit - x.BaseCredit),
+                ProfitAndLossMovement = -g.Where(x => x.Account.AccountType == "EXPENSE" || x.Account.AccountType == "REVENUE")
+                    .Sum(x => x.BaseDebit - x.BaseCredit)
+            }).ToListAsync(token);
+        var legacyBalance = await LegacyExpenses(new(2000, 1, 1), to, token);
+        companyIncome -= legacyBalance.Sum(x => x.Amount);
+        companyIncome += manualMovements.Sum(x => x.HasCashMovement ? x.CashMovement : x.ProfitAndLossMovement);
         var otherCash = await otherLines.Where(x => x.Account.IsCashAccount).GroupBy(x => x.JournalEntryId).Select(g => g.Sum(x => x.BaseDebit - x.BaseCredit)).ToListAsync(token);
         var bookCashIn = originals.Where(x => AccountingBookValues.IsCashIn(x.Category)).Sum(x => x.Amount);
         var bookCashOut = originals.Where(x => AccountingBookValues.IsCashOut(x.Category)).Sum(x => x.Amount);
@@ -120,7 +153,7 @@ public sealed partial class AccountingBookService
         var cashOut = bookCashOut + legacy.Sum(x => x.Amount) - otherCash.Where(x => x < 0).Sum();
         var pending = db.AccountingBookEntries.Where(x => x.DeletedAt == null && x.TransactionDate >= from && x.TransactionDate <= to && (x.JournalEntry.Status == "DRAFT" || x.JournalEntry.Status == "PENDING_APPROVAL" || x.JournalEntry.Status == "APPROVED"));
         var outstanding = await AdvancesAsync(to, null, null, token);
-        return new(from, to, income, expenses, advances, repayments, cashIn, cashOut, cashIn - cashOut, await pending.SumAsync(x => (decimal?)x.Amount, token) ?? 0, await pending.CountAsync(token),
+        return new(from, to, companyIncome, revenue, expenses, advances, repayments, cashIn, cashOut, cashIn - cashOut, await pending.SumAsync(x => (decimal?)x.Amount, token) ?? 0, await pending.CountAsync(token),
             outstanding.Sum(x => x.Remaining), outstanding.Where(x => x.Date < from || x.Carried).Sum(x => x.Remaining), legacy.Count,
             totals.Select(x => new AccountingBookCategoryTotalDto(x.Key, x.Value.Amount, x.Value.Count)).ToArray());
     }

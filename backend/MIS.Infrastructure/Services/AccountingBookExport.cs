@@ -65,7 +65,7 @@ public sealed partial class AccountingBookService
             var summary = await SummaryAsync(from, to, token);
             Add(T("ملخص المصروفات والوارد", "Income and expense summary"), [T("البند", "Metric"), T("القيمة بالجنيه", "Amount EGP")], new List<object?[]>
             {
-                new object?[] {T("إجمالي الإيرادات", "Income"), summary.Income}, new object?[] {T("إجمالي المصروفات", "Expenses"), summary.Expenses}, new object?[] {T("صافي النتيجة", "Net result"), summary.Income - summary.Expenses},
+                new object?[] {T("رصيد وارد الشركة", "Company income balance"), summary.CompanyIncome}, new object?[] {T("الإيرادات", "Revenue"), summary.Revenue}, new object?[] {T("إجمالي المصروفات", "Expenses"), summary.Expenses}, new object?[] {T("صافي نتيجة الإيرادات", "Net revenue result"), summary.Revenue - summary.Expenses},
                 new object?[] {T("إجمالي الوارد النقدي", "Cash inflow"), summary.CashIn}, new object?[] {T("إجمالي الخارج النقدي", "Cash outflow"), summary.CashOut}, new object?[] {T("صافي الحركة النقدية", "Net cash flow"), summary.NetCashFlow},
                 new object?[] {T("سلف مصروفة", "Advances issued"), summary.AdvancesIssued}, new object?[] {T("سداد السلف", "Advance repayments"), summary.AdvanceRepayments}, new object?[] {T("رصيد السلف المتبقي", "Outstanding advances"), summary.OutstandingAdvances},
                 new object?[] {T("سلف مرحلة", "Carried advances"), summary.CarriedAdvances}, new object?[] {T("حركات تنتظر الترحيل", "Pending posting"), summary.PendingAmount}, new object?[] {T("صرف سابق بدون قيد مرتبط", "Legacy paid records without journals"), summary.LegacyPaidCount}
@@ -73,6 +73,23 @@ public sealed partial class AccountingBookService
             Add(T("تفصيل البنود", "Category breakdown"), [T("البند", "Category"), T("المبلغ", "Amount"), T("عدد الحركات", "Count")], summary.Categories.Select(x => new object?[] { CategoryName(x.Category, ar), x.Amount, x.Count }));
             var legacy = await LegacyExpenses(from, to, token);
             if (legacy.Count > 0) Add(T("صرف سابق غير مرحل", "Legacy paid sources"), [T("المصدر", "Source"), T("معرف السجل", "Record ID"), T("البند", "Category"), T("البيان", "Description"), T("المبلغ", "Amount")], legacy.Select(x => new object?[] { x.Kind, x.Id.ToString(), CategoryName(x.Category, ar), x.Description, x.Amount }));
+        }
+        if (all || report == "profit-loss")
+        {
+            var result = await ProfitLossAsync(from, to, token);
+            Add(T("قائمة الأرباح والخسائر", "Profit & Loss"), [T("البند", "Metric"), T("المبلغ", "Amount")],
+            [
+                new object?[] { T("إجمالي الإيرادات", "Total Revenue"), result.TotalRevenue },
+                new object?[] { T("إجمالي المصروفات", "Total Expenses"), result.TotalExpenses },
+                new object?[] { T(result.NetProfitLoss < 0 ? "صافي الخسارة" : "صافي الربح", result.NetProfitLoss < 0 ? "Net Loss" : "Net Profit"), Math.Abs(result.NetProfitLoss) }
+            ]);
+            var detailRows = result.RevenueCategories.SelectMany(category => category.Transactions.Select(transaction =>
+                    new object?[] { T("إيراد", "Revenue"), CategoryName(category.Category, ar), transaction.Date, transaction.JournalNumber, transaction.Description, transaction.Amount }))
+                .Concat(result.ExpenseCategories.SelectMany(category => category.Transactions.Select(transaction =>
+                    new object?[] { T("مصروف", "Expense"), CategoryName(category.Category, ar), transaction.Date, transaction.JournalNumber, transaction.Description, transaction.Amount })));
+            Add(T("تفاصيل الأرباح والخسائر", "Profit & Loss details"),
+                [T("النوع", "Type"), T("الفئة", "Category"), T("التاريخ", "Date"), T("رقم القيد", "Journal"), T("البيان", "Description"), T("المبلغ", "Amount")],
+                detailRows);
         }
         if (all || report == "cashbook")
         {
@@ -172,7 +189,7 @@ public sealed partial class AccountingBookService
         : ["Year", "Month", "Name", supervisor ? "Collectors" : "Cases", "Approved collections", "Eligible", "Rule", "Rate", "Commission", "Adjustments", "Final", "Status"];
     internal static string CategoryName(string category, bool ar) => (category, ar) switch
     {
-        ("PETTY", true) => "مصاريف نثرية", ("FIXED", true) => "مصاريف شهرية ثابتة", ("TRANSPORTATION", true) => "انتقالات", ("ADVANCE", true) => "سلف", ("CARRIED_ADVANCE", true) => "سلف مرحلة", ("ADVANCE_REPAYMENT", true) => "سداد السلف", ("SALARY", true) => "المرتبات", ("BONUS", true) => "مكافآت", ("LEGAL", true) => "مصاريف قضائية", ("COLLECTOR_COMMISSION", true) => "عمولات المحصلين", ("SUPERVISOR_COMMISSION", true) => "عمولات السوبر فايزر", ("PAYROLL_COMMISSION", true) => "عمولات ضمن المرتبات", ("INCOME", true) => "الوارد والإيرادات", ("OTHER", true) => "مصاريف أخرى", _ => category.Replace('_', ' ')
+        ("PETTY", true) => "مصاريف نثرية", ("FIXED", true) => "مصاريف شهرية ثابتة", ("TRANSPORTATION", true) => "انتقالات", ("ADVANCE", true) => "سلف", ("CARRIED_ADVANCE", true) => "سلف مرحلة", ("ADVANCE_REPAYMENT", true) => "سداد السلف", ("SALARY", true) => "المرتبات", ("BONUS", true) => "مكافآت", ("LEGAL", true) => "مصاريف قضائية", ("COLLECTOR_COMMISSION", true) => "عمولات المحصلين", ("SUPERVISOR_COMMISSION", true) => "عمولات السوبر فايزر", ("PAYROLL_COMMISSION", true) => "عمولات ضمن المرتبات", ("INCOME", true) => "وارد الشركة", ("REVENUE", true) => "الإيرادات", ("OTHER", true) => "مصاريف أخرى", _ => category.Replace('_', ' ')
     };
     private static string StatusName(string status, bool ar) => status switch
     {

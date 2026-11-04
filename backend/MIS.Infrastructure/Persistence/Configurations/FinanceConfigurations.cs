@@ -15,6 +15,7 @@ internal static class FinanceSeed
     public static readonly Guid GatewayAccountId = Guid.Parse("10000000-0000-0000-0001-000000112300");
     public static readonly Guid ClientClearingAccountId = Guid.Parse("10000000-0000-0000-0002-000000210100");
     public static readonly Guid ClientPayableAccountId = Guid.Parse("10000000-0000-0000-0002-000000210200");
+    public static readonly Guid CompanyIncomeClearingAccountId = Guid.Parse("10000000-0000-0000-0002-000000210300");
     public static readonly Guid RevenueAccountId = Guid.Parse("10000000-0000-0000-0004-000000410100");
     public static readonly Guid ExpenseAccountId = Guid.Parse("10000000-0000-0000-0006-000000610100");
     public static readonly Guid OperatingCashAccountId = Guid.Parse("10000000-0000-0000-0001-000000110300");
@@ -22,7 +23,7 @@ internal static class FinanceSeed
     public static readonly Guid AdvanceAccountId = Guid.Parse("10000000-0000-0000-0001-000000113100");
     public static readonly Guid OpeningAccountId = Guid.Parse("10000000-0000-0000-0003-000000310100");
     public static readonly HashSet<Guid> OperationAccountIds = new(Enumerable.Range(11, 9).Select(x => Guid.Parse($"10000000-0000-0000-0006-{610000 + x * 10:D12}")))
-    { OperatingCashAccountId, OperatingBankAccountId, AdvanceAccountId, OpeningAccountId, RevenueAccountId, ExpenseAccountId, CashboxAccountId };
+    { OperatingCashAccountId, OperatingBankAccountId, AdvanceAccountId, OpeningAccountId, RevenueAccountId, CompanyIncomeClearingAccountId, ExpenseAccountId, CashboxAccountId };
 }
 
 public sealed class FinanceLegalEntityConfiguration : IEntityTypeConfiguration<FinanceLegalEntity>
@@ -82,6 +83,7 @@ public sealed class FinanceAccountConfiguration : IEntityTypeConfiguration<Finan
             Account(FinanceSeed.GatewayAccountId,"112300","مستحقات بوابات الدفع","Gateway Receivable","ASSET","DEBIT","GATEWAY", client: true),
             Account(FinanceSeed.ClientClearingAccountId,"210100","أموال عملاء تحت التسوية","Client Funds Clearing","LIABILITY","CREDIT","CLIENT_FUNDS", client: true),
             Account(FinanceSeed.ClientPayableAccountId,"210200","أموال عملاء مستحقة","Client Funds Payable","LIABILITY","CREDIT","CLIENT_FUNDS", client: true),
+            Account(FinanceSeed.CompanyIncomeClearingAccountId,"210300","وارد الشركة تحت التصنيف","Company receipts clearing","LIABILITY","CREDIT"),
             Account(FinanceSeed.RevenueAccountId,"410100","إيراد عمولات التحصيل","Collection Commission Revenue","REVENUE","CREDIT"),
             Account(FinanceSeed.ExpenseAccountId,"610100","مصروفات تشغيلية عامة","General Operating Expenses","EXPENSE","DEBIT")
         };

@@ -4943,6 +4943,22 @@ namespace MIS.Infrastructure.Persistence.Migrations
                         },
                         new
                         {
+                            Id = new Guid("10000000-0000-0000-0002-000000210300"),
+                            AccountType = "LIABILITY",
+                            Code = "210300",
+                            IsActive = true,
+                            IsCashAccount = false,
+                            LegalEntityId = new Guid("10000000-0000-0000-0000-000000000001"),
+                            NameArabic = "وارد الشركة تحت التصنيف",
+                            NameEnglish = "Company receipts clearing",
+                            NormalBalance = "CREDIT",
+                            PostingAllowed = true,
+                            RequiresBranch = false,
+                            RequiresClient = false,
+                            RequiresCollector = false
+                        },
+                        new
+                        {
                             Id = new Guid("10000000-0000-0000-0004-000000410100"),
                             AccountType = "REVENUE",
                             Code = "410100",
@@ -4972,6 +4988,235 @@ namespace MIS.Infrastructure.Persistence.Migrations
                             RequiresBranch = false,
                             RequiresClient = false,
                             RequiresCollector = false
+                        });
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaim", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountWithoutVat")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("BankOrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CancelledById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ClaimDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ClaimType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("DateInBank")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ImportBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsHistoricalImport")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Month")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset?>("ReceiptConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReceiptConfirmedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Serial")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("TaxAtSource")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TaxAtSourcePercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("numeric(9,4)");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TotalInBank")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TotalWithVat")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Vat")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("VatPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("numeric(9,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CancelledById");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("ImportBatchId");
+
+                    b.HasIndex("ReceiptConfirmedById");
+
+                    b.HasIndex("UpdatedById");
+
+                    b.HasIndex("ClaimDate", "Status");
+
+                    b.HasIndex("BankOrganizationId", "ClaimType", "Month");
+
+                    b.ToTable("claims", "finance", t =>
+                        {
+                            t.HasCheckConstraint("CK_FinanceClaims_Status", "\"Status\" IN ('PENDING','RECEIVED','CANCELLED')");
+                        });
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaimImportBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("PreviewJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("TotalRows")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfirmedById");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("FileHash")
+                        .IsUnique();
+
+                    b.ToTable("claim_import_batches", "finance");
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaimReceiptPosting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountingBookEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("ClaimId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsHistoricalPosting")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateOnly>("ReceiptDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ReversalJournalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ReversedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedById")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountingBookEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("ClaimId")
+                        .IsUnique()
+                        .HasFilter("\"ReversedAt\" IS NULL");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("ReversedById");
+
+                    b.ToTable("claim_receipt_postings", "finance", t =>
+                        {
+                            t.HasCheckConstraint("CK_FinanceClaimReceiptPostings_Amount", "\"Amount\" > 0");
                         });
                 });
 
@@ -5762,6 +6007,97 @@ namespace MIS.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_LegalCaseFiles_Stage", "\"Stage\" IN ('INTAKE','NOTICE','COURT','HEARING','JUDGMENT','SETTLEMENT','RETURNED')");
                         });
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.LegalClientAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique();
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("LegalClientAssignments", (string)null);
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.LegalClientDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("CustomerId", "UploadedAt");
+
+                    b.ToTable("LegalClientDocuments", (string)null);
                 });
 
             modelBuilder.Entity("MIS.Domain.Entities.Position", b =>
@@ -7708,6 +8044,102 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaim", b =>
+                {
+                    b.HasOne("MIS.Domain.Entities.ClientOrganization", "BankOrganization")
+                        .WithMany()
+                        .HasForeignKey("BankOrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MIS.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CancelledById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MIS.Domain.Entities.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.FinanceClaimImportBatch", "ImportBatch")
+                        .WithMany()
+                        .HasForeignKey("ImportBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MIS.Domain.Entities.User", "ReceiptConfirmedBy")
+                        .WithMany()
+                        .HasForeignKey("ReceiptConfirmedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MIS.Domain.Entities.User", "UpdatedBy")
+                        .WithMany()
+                        .HasForeignKey("UpdatedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("BankOrganization");
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("ImportBatch");
+
+                    b.Navigation("ReceiptConfirmedBy");
+
+                    b.Navigation("UpdatedBy");
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaimImportBatch", b =>
+                {
+                    b.HasOne("MIS.Domain.Entities.User", "ConfirmedBy")
+                        .WithMany()
+                        .HasForeignKey("ConfirmedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MIS.Domain.Entities.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConfirmedBy");
+
+                    b.Navigation("CreatedBy");
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaimReceiptPosting", b =>
+                {
+                    b.HasOne("MIS.Domain.Entities.AccountingBookEntry", "AccountingBookEntry")
+                        .WithMany()
+                        .HasForeignKey("AccountingBookEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.FinanceClaim", "Claim")
+                        .WithMany("ReceiptPostings")
+                        .HasForeignKey("ClaimId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.User", "ReversedBy")
+                        .WithMany()
+                        .HasForeignKey("ReversedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingBookEntry");
+
+                    b.Navigation("Claim");
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("ReversedBy");
+                });
+
             modelBuilder.Entity("MIS.Domain.Entities.FinancialAuditLog", b =>
                 {
                     b.HasOne("MIS.Domain.Entities.User", "Actor")
@@ -7962,6 +8394,52 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Navigation("ReceivedByUser");
                 });
 
+            modelBuilder.Entity("MIS.Domain.Entities.LegalClientAssignment", b =>
+                {
+                    b.HasOne("MIS.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.CollectionCustomer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.User", "UpdatedByUser")
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("UpdatedByUser");
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.LegalClientDocument", b =>
+                {
+                    b.HasOne("MIS.Domain.Entities.CollectionCustomer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MIS.Domain.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("UploadedByUser");
+                });
+
             modelBuilder.Entity("MIS.Domain.Entities.Position", b =>
                 {
                     b.HasOne("MIS.Domain.Entities.Department", "Department")
@@ -8085,6 +8563,11 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Navigation("Notifications");
 
                     b.Navigation("Rows");
+                });
+
+            modelBuilder.Entity("MIS.Domain.Entities.FinanceClaim", b =>
+                {
+                    b.Navigation("ReceiptPostings");
                 });
 
             modelBuilder.Entity("MIS.Domain.Entities.JournalEntry", b =>

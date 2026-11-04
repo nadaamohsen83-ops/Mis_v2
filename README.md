@@ -173,10 +173,12 @@ Routes:
 - `/collections/branding` - validated bank/company logo management with polished fallback identity marks
 - `/collections/profile` and `/hr/profile` - self-service account, login email, and password security
 - `/finance/dashboard` - posted-ledger finance command center with bank/company-money separation
+- `/finance/claims` - bilingual claims register with the fourteen Excel business fields, validated import, and matching export
 - `/finance/journals` and `/finance/journals/:id` - journal workflow, approval, posting, and linked reversal
 - `/finance/accounts` - bilingual chart of accounts and live posted balances
 - `/finance/periods` - fiscal-year initialization, soft close, close, and controlled reopen
 - `/finance/reports` - as-of trial balance sourced from posted/reversed journal chains
+- `/finance/profit-loss` - bilingual profit and loss report with date-filtered posted revenue and expense details
 
 ## Accounting & Finance Module
 
@@ -185,6 +187,8 @@ Finance is implemented as a bounded context inside the existing modular monolith
 Approving a Collections payment now performs the operational balance update and the `CollectionConfirmed` accounting event, balanced journal, client-subledger entry, audit record, and source-to-journal link inside the same serializable database transaction. A failure rolls back the complete approval. Database uniqueness protects the source event and idempotency key, and a payment can link to only one financial journal.
 
 Manual journals follow `DRAFT -> PENDING_APPROVAL -> APPROVED -> POSTED`. The maker cannot approve their own journal, closed periods reject posting, control accounts require specialized access and dimensions, and posted entries are corrected through linked reversals rather than editing or deletion. The current implementation posts EGP at rate 1 and deliberately blocks foreign-currency posting until an approved exchange-rate source/profile is configured.
+
+Claims use the same fourteen business fields as the source Excel sheet. Amounts are recalculated by the server, exports contain only those fourteen columns, and a claim receipt affects Company Income only after explicit confirmation; historical imports never post automatically.
 
 ## Enterprise Collections Module
 
@@ -323,4 +327,3 @@ Errors use a consistent response shape:
 ```
 
 Technical exception details are logged by the API and are not shown to users.
-

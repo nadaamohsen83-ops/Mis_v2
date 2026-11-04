@@ -14,6 +14,8 @@ export function useFinanceText() {
   const entryType = (value: string) => ({
     MANUAL: text('قيد يدوي', 'Manual journal'),
     ACCOUNTING_OPERATION: text('مصاريف ووارد', 'Expense / income'),
+    COMPANY_INCOME: text('وارد الشركة', 'Company income'),
+    REVENUE: text('إيرادات', 'Revenue'),
     ACCOUNTING_PAYMENT: text('صرف مصروفات', 'Expense payment'),
     ACCOUNTING_DELETE: text('تسوية حذف', 'Deletion correction'),
     REVERSAL: text('قيد عكسي', 'Reversal'),

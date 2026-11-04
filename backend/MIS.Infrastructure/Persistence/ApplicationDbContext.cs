@@ -84,6 +84,9 @@ public sealed class ApplicationDbContext : DbContext
     public DbSet<CollectionClearingEvent> CollectionClearingEvents => Set<CollectionClearingEvent>();
     public DbSet<AccountingBookEntry> AccountingBookEntries => Set<AccountingBookEntry>();
     public DbSet<AccountingRecurringExpense> AccountingRecurringExpenses => Set<AccountingRecurringExpense>();
+    public DbSet<FinanceClaim> FinanceClaims => Set<FinanceClaim>();
+    public DbSet<FinanceClaimReceiptPosting> FinanceClaimReceiptPostings => Set<FinanceClaimReceiptPosting>();
+    public DbSet<FinanceClaimImportBatch> FinanceClaimImportBatches => Set<FinanceClaimImportBatch>();
 
     public DbSet<AccountingPayrollPeriod> AccountingPayrollPeriods => Set<AccountingPayrollPeriod>();
     public DbSet<AccountingEmployeePayroll> AccountingEmployeePayrolls => Set<AccountingEmployeePayroll>();
@@ -98,6 +101,8 @@ public sealed class ApplicationDbContext : DbContext
     public DbSet<RuntimeSetting> RuntimeSettings => Set<RuntimeSetting>();
     public DbSet<LegalCaseFile> LegalCaseFiles => Set<LegalCaseFile>();
     public DbSet<LegalCaseAction> LegalCaseActions => Set<LegalCaseAction>();
+    public DbSet<LegalClientAssignment> LegalClientAssignments => Set<LegalClientAssignment>();
+    public DbSet<LegalClientDocument> LegalClientDocuments => Set<LegalClientDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

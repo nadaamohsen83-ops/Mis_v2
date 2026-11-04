@@ -79,6 +79,7 @@ public sealed partial class AccountingBookService : IAccountingBookService
         if (request.TransactionDate.Year < 2000 || request.TransactionDate > Today()) throw new HrValidationException("Choose an accounting date no later than today.");
         if (request.Amount <= 0 || decimal.Round(request.Amount, 2) != request.Amount) throw new HrValidationException("Use a positive amount with at most two decimal places.");
         if (request.PaymentMethod?.Length > 80 || request.Notes?.Length > 1000) throw new HrValidationException("Payment method or notes exceed the allowed length.");
+        if (request.RelatedAdvanceId.HasValue && request.Category != "ADVANCE_REPAYMENT") throw new HrValidationException("Only an advance repayment can reference an original advance.");
         if (request.EmployeeId.HasValue && !await db.Employees.AnyAsync(x => x.Id == request.EmployeeId && !x.IsArchived, token)) throw new HrNotFoundException("Employee was not found.");
         if (AccountingBookValues.IsAdvance(request.Category) && request.EmployeeId is null) throw new HrValidationException("An employee is required for an advance.");
         var source = request.RequestId.HasValue ? $"MANUAL:{request.RequestId}" : null;
@@ -95,6 +96,37 @@ public sealed partial class AccountingBookService : IAccountingBookService
         if (tx is not null) await tx.CommitAsync(token);
         return result;
     }
+
+    public async Task<AccountingBookEntryDto> RecordClaimReceiptAsync(Guid claimId, Guid receiptPostingId, DateOnly receiptDate, decimal amount, CancellationToken token)
+    {
+        EnsureAccess();
+        if (!IsAdmin && !user.Permissions.Contains(SystemPermissionCodes.FinanceClaimsConfirmReceipt))
+            throw new HrForbiddenException("Claim receipt confirmation permission is required.");
+        if (claimId == Guid.Empty || receiptPostingId == Guid.Empty || amount <= 0 || decimal.Round(amount, 2) != amount)
+            throw new HrValidationException("The claim receipt details are invalid.");
+        if (receiptDate.Year is < 2000 or > 2100 || receiptDate > Today())
+            throw new HrValidationException("Choose a valid bank receipt date no later than today.");
+
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token) : null;
+        var source = $"CLAIM:{claimId}:{receiptPostingId}";
+        var existing = await db.AccountingBookEntries.AsNoTracking().SingleOrDefaultAsync(x => x.SourceKey == source, token);
+        if (existing is not null)
+        {
+            if (existing.Amount != amount || existing.TransactionDate != receiptDate || existing.Category != "INCOME" || existing.DeletedAt.HasValue)
+                throw new HrConflictException("This claim receipt key already exists with different or reversed accounting data.");
+            var result = await GetAsync(existing.Id, token);
+            if (tx is not null) await tx.CommitAsync(token);
+            return result;
+        }
+
+        var request = new CreateAccountingBookEntryRequest(
+            "INCOME", receiptDate, amount, FinanceSeed.CompanyIncomeClearingAccountId, FinanceSeed.OperatingBankAccountId,
+            $"Claim bank receipt {claimId:N}", claimId.ToString("N"));
+        await ValidateAccounts(request.Category, request.AccountId, request.CounterAccountId, token);
+        var entry = await CreateRecordedEntry(request, null, source, token);
+        if (tx is not null) await tx.CommitAsync(token);
+        return entry;
+    }
     private async Task<AccountingBookEntryDto> CreateRecordedEntry(CreateAccountingBookEntryRequest request, Guid? recurringId, string? source, CancellationToken token)
     {
         var incoming = AccountingBookValues.IsCashIn(request.Category);
@@ -102,7 +134,13 @@ public sealed partial class AccountingBookService : IAccountingBookService
         var creditId = incoming ? request.AccountId : request.CounterAccountId;
         var period = await OpenPeriod(request.TransactionDate, token);
         var now = DateTimeOffset.UtcNow;
-        var journal = new JournalEntry(FinanceSeed.LegalEntityId, period.Id, null, "ACCOUNTING_OPERATION", request.TransactionDate, request.TransactionDate, "EGP", request.Description, user.UserId, now);
+        var entryType = request.Category switch
+        {
+            "INCOME" => "COMPANY_INCOME",
+            "REVENUE" => "REVENUE",
+            _ => "ACCOUNTING_OPERATION"
+        };
+        var journal = new JournalEntry(FinanceSeed.LegalEntityId, period.Id, null, entryType, request.TransactionDate, request.TransactionDate, "EGP", request.Description, user.UserId, now);
         journal.AddLine(debitId, request.Amount, 0, request.Amount, 0, 1, request.Description);
         journal.AddLine(creditId, 0, request.Amount, 0, request.Amount, 1, request.Description);
         journal.RecordConfirmedAccounting(Number(request.TransactionDate, journal.Id), user.UserId, now);
@@ -117,7 +155,7 @@ public sealed partial class AccountingBookService : IAccountingBookService
         var advance = await db.AccountingBookEntries.AsNoTracking().Include(x => x.JournalEntry).SingleOrDefaultAsync(x => x.Id == advanceId, token);
         if (advance is null || !AccountingBookValues.IsAdvance(advance.Category) || advance.JournalEntry.Status != "POSTED") throw new HrValidationException("Choose a posted employee advance to settle.");
         if (advance.EmployeeId != employeeId || advance.AccountId != accountId || date < advance.TransactionDate) throw new HrValidationException("Repayment must use the same employee and advance account, on or after the advance date.");
-        var paid = await db.AccountingBookEntries.Where(x => x.RelatedAdvanceId == advanceId && x.Id != excludeId && x.JournalEntry.Status == "POSTED").SumAsync(x => (decimal?)x.Amount, token) ?? 0;
+        var paid = await db.AccountingBookEntries.Where(x => x.Category == "ADVANCE_REPAYMENT" && x.RelatedAdvanceId == advanceId && x.Id != excludeId && x.JournalEntry.Status == "POSTED").SumAsync(x => (decimal?)x.Amount, token) ?? 0;
         if (amount > advance.Amount - paid) throw new HrConflictException("Repayment exceeds the outstanding advance balance.");
     }
     public async Task<AccountingBookEntryDto> TransitionAsync(Guid id, string action, string? reason, CancellationToken token)
@@ -149,7 +187,7 @@ public sealed partial class AccountingBookService : IAccountingBookService
                     await finance.PostJournalAsync(entry.JournalEntryId, token); break;
                 case "cancel": EnsureManage(); entry.JournalEntry.Cancel(); Audit("AccountingEntryCancelled", entry.Id, null, new { entry.JournalEntry.Status }, reason); await db.SaveChangesAsync(token); break;
                 case "reverse":
-                    if (AccountingBookValues.IsAdvance(entry.Category) && await db.AccountingBookEntries.AnyAsync(x => x.RelatedAdvanceId == id && x.JournalEntry.Status == "POSTED", token)) throw new HrConflictException("Reverse the advance repayments before reversing the original advance.");
+                    if (AccountingBookValues.IsAdvance(entry.Category) && await db.AccountingBookEntries.AnyAsync(x => x.Category == "ADVANCE_REPAYMENT" && x.RelatedAdvanceId == id && x.JournalEntry.Status == "POSTED", token)) throw new HrConflictException("Reverse the advance repayments before reversing the original advance.");
                     await finance.ReverseJournalAsync(entry.JournalEntryId, new PeriodActionRequest(reason ?? ""), token); break;
                 default: throw new HrValidationException("Unsupported accounting action.");
             }
@@ -222,7 +260,7 @@ public sealed partial class AccountingBookService : IAccountingBookService
         var ids = rows.Select(x => x.Id).ToArray();
         var repayments = ids.Length == 0
             ? new Dictionary<Guid, decimal>()
-            : await db.AccountingBookEntries.Where(x => x.RelatedAdvanceId != null && ids.Contains(x.RelatedAdvanceId.Value) &&
+            : await db.AccountingBookEntries.Where(x => x.Category == "ADVANCE_REPAYMENT" && x.RelatedAdvanceId != null && ids.Contains(x.RelatedAdvanceId.Value) &&
                     (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED") && x.TransactionDate <= asOf &&
                     !db.JournalEntries.Any(r => r.ReversalOfJournalId == x.JournalEntryId && r.PostingDate <= asOf && (r.Status == "POSTED" || r.Status == "REVERSED")))
                 .GroupBy(x => x.RelatedAdvanceId!.Value).Select(g => new { Id = g.Key, Amount = g.Sum(x => x.Amount) })
@@ -240,7 +278,8 @@ public sealed partial class AccountingBookService : IAccountingBookService
         var relatedAdvances = await ActiveAdvancesQuery().Where(x => x.EmployeeId == advance.EmployeeId).ToListAsync(token);
         var relatedIds = relatedAdvances.Select(x => x.Id).ToArray();
         var allRepayments = await AdvanceRepayments(relatedIds, token);
-        var payments = await db.AccountingBookEntries.AsNoTracking().Where(x => x.RelatedAdvanceId == id && x.Category == "ADVANCE_REPAYMENT" && x.JournalEntry.Status == "POSTED")
+        var payments = await db.AccountingBookEntries.AsNoTracking().Where(x => x.RelatedAdvanceId == id && x.Category == "ADVANCE_REPAYMENT" &&
+                (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED" || x.JournalEntry.Status == "CANCELLED"))
             .Include(x => x.CounterAccount).Include(x => x.CreatedBy).OrderBy(x => x.TransactionDate).ThenBy(x => x.CreatedAt).ToListAsync(token);
         var totalOutstanding = relatedAdvances.Sum(x => x.Amount - allRepayments.GetValueOrDefault(x.Id));
         var paid = allRepayments.GetValueOrDefault(id);
@@ -248,8 +287,8 @@ public sealed partial class AccountingBookService : IAccountingBookService
         var cumulative = 0m;
         foreach (var payment in payments)
         {
-            cumulative += payment.Amount;
-            paymentRows.Add(new(payment.Id, payment.TransactionDate, payment.Amount,
+            if (payment.JournalEntry.Status is "POSTED" or "REVERSED") cumulative += payment.Amount;
+            paymentRows.Add(new(payment.Id, payment.TransactionDate, payment.Amount, payment.JournalEntry.Status,
                 payment.PaymentMethod ?? (ApiTextLocalizer.IsArabic ? payment.CounterAccount.NameArabic : payment.CounterAccount.NameEnglish),
                 payment.Reference, payment.Notes, payment.CreatedBy.FullName, payment.CreatedAt, advance.Amount - cumulative));
         }

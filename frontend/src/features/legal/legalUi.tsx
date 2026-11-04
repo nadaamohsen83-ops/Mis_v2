@@ -51,7 +51,15 @@ export function useLegalText() {
       WRITE_OFF: text('مشطوبة', 'Written off'),
     }[value] ?? value.replaceAll('_', ' '));
 
-  return { ar, text, money, number, date, dateTime, stage, action, collectionStatus, stages: LEGAL_STAGES, actions: LEGAL_ACTIONS };
+  const clientStatus = (value: string) =>
+    ({
+      ACTIVE: text('نشط', 'Active'),
+      LEGAL: text('قانوني', 'Legal'),
+      ON_HOLD: text('معلق', 'On hold'),
+      CLOSED: text('مغلق', 'Closed'),
+    }[value] ?? value.replaceAll('_', ' '));
+
+  return { ar, text, money, number, date, dateTime, stage, action, collectionStatus, clientStatus, stages: LEGAL_STAGES, actions: LEGAL_ACTIONS };
 }
 
 export function LegalStageBadge({ value }: { value: string }) {

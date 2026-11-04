@@ -107,6 +107,15 @@ public sealed class CollectionCustomer
     public DateTimeOffset CreatedAt { get; private set; }
     public void ApplyImportedContact(string? nameArabic, string? nameEnglish, string? nationalId, string? primaryPhone)
     { FullNameArabic = Normalize(nameArabic) ?? FullNameArabic; FullNameEnglish = Normalize(nameEnglish) ?? FullNameEnglish; NationalId = Normalize(nationalId) ?? NationalId; PrimaryPhone = Normalize(primaryPhone) ?? PrimaryPhone; }
+    public void FillMissingLegalImportDetails(string? nameArabic, string? nameEnglish, string? nationalId, string? primaryPhone, string? addressArabic, string? addressEnglish)
+    {
+        FullNameArabic = Normalize(FullNameArabic) ?? Normalize(nameArabic);
+        FullNameEnglish = Normalize(FullNameEnglish) ?? Normalize(nameEnglish);
+        NationalId = Normalize(NationalId) ?? Normalize(nationalId);
+        PrimaryPhone = Normalize(PrimaryPhone) ?? Normalize(primaryPhone);
+        AddressArabic = Normalize(AddressArabic) ?? Normalize(addressArabic);
+        AddressEnglish = Normalize(AddressEnglish) ?? Normalize(addressEnglish);
+    }
     public void ApplyImportedProfile(string? alternatePhone, string? tertiaryPhone, string? region, string? area, string? city, string? address, string? employer, string? jobTitle, string? feedback, bool arabic, string? secondaryAddress = null)
     {
         AlternatePhone = Normalize(alternatePhone) ?? AlternatePhone;

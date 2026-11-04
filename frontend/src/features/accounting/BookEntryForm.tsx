@@ -29,7 +29,7 @@ export function BookEntryForm({ open, category = 'PETTY', advance, onClose, onSa
     return () => { active = false; };
   }, [open, category, advance]);
   const cash = form.category !== 'CARRIED_ADVANCE'; const isAdvance = ['ADVANCE', 'CARRIED_ADVANCE', 'ADVANCE_REPAYMENT'].includes(form.category);
-  const accountType = isAdvance ? 'ASSET' : form.category === 'INCOME' ? 'REVENUE' : 'EXPENSE';
+  const accountType = isAdvance ? 'ASSET' : form.category === 'INCOME' ? 'LIABILITY' : form.category === 'REVENUE' ? 'REVENUE' : 'EXPENSE';
   const usable = accounts.filter(x => x.isActive && x.postingAllowed && !x.controlAccountType);
   const changeCategory = (cat: string) => setForm({ ...form, category: cat, accountId: accounts.find(x => x.code === categories[cat][2])?.id ?? '', counterAccountId: accounts.find(x => x.code === (cat === 'CARRIED_ADVANCE' ? '310100' : '110300'))?.id ?? '', employeeId: undefined, relatedAdvanceId: undefined });
   const save = async () => {

@@ -1,8 +1,14 @@
-import { apiClient, requestFormData } from '../../../services/apiClient';
+import { apiClient, downloadApiFile, requestFormData } from '../../../services/apiClient';
 import type {
   LegalCaseDetails,
   LegalCasePage,
   LegalDashboard,
+  LegalClientDetails,
+  LegalClientDocument,
+  LegalClientImportPreview,
+  LegalClientImportResult,
+  LegalClientImportSourceRow,
+  LegalClientPage,
   LegalImportHistoryItem,
   LegalImportPreview,
   LegalImportResult,
@@ -19,6 +25,48 @@ export const legalService = {
 
   async organizations() {
     return (await apiClient.get<LegalOrganization[]>('/legal/organizations')).data;
+  },
+
+  async clients(params: { search?: string; page?: number; pageSize?: number }) {
+    return (await apiClient.get<LegalClientPage>('/legal/clients', {
+      params: {
+        search: params.search || undefined,
+        page: params.page ?? 1,
+        pageSize: params.pageSize ?? 20,
+      },
+    })).data;
+  },
+
+  async client(customerId: string) {
+    return (await apiClient.get<LegalClientDetails>(`/legal/clients/${customerId}`)).data;
+  },
+
+  async updateClient(customerId: string, input: { status: string; notes: string }) {
+    return (await apiClient.put<LegalClientDetails>(`/legal/clients/${customerId}`, input)).data;
+  },
+
+  async uploadClientDocument(customerId: string, file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestFormData<LegalClientDocument>(`/legal/clients/${customerId}/documents`, formData);
+  },
+
+  async downloadClientDocument(documentId: string) {
+    return downloadApiFile(`/legal/client-documents/${documentId}`, 'legal-client-document');
+  },
+
+  async deleteClientDocument(documentId: string) {
+    await apiClient.delete(`/legal/client-documents/${documentId}`);
+  },
+
+  async previewClientImport(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestFormData<LegalClientImportPreview>('/legal/client-imports/preview', formData);
+  },
+
+  async importClients(fileName: string, rows: LegalClientImportSourceRow[]) {
+    return (await apiClient.post<LegalClientImportResult>('/legal/client-imports', { fileName, rows })).data;
   },
 
   async cases(params: { search?: string; organizationId?: string; stage?: string; page?: number; pageSize?: number }) {

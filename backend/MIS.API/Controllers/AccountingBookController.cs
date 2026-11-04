@@ -25,6 +25,8 @@ public sealed class AccountingBookController(IAccountingBookService service) : C
     public async Task<IActionResult> DeleteSource(string kind, Guid id, ConfirmAccountingDeletionRequest request, CancellationToken token) { await service.DeleteSourceAsync(kind, id, request, token); return NoContent(); }
     [HttpGet("summary")]
     public Task<AccountingBookSummaryDto> Summary([FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken token) => service.SummaryAsync(from, to, token);
+    [HttpGet("profit-loss")]
+    public Task<AccountingProfitLossDto> ProfitLoss([FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken token) => service.ProfitLossAsync(from, to, token);
     [HttpGet("advances")]
     public Task<AccountingAdvancesResultDto> Advances([FromQuery] AccountingAdvancesFilter filter, CancellationToken token) => service.AdvancesAsync(filter, token);
     [HttpGet("advances/{id:guid}")]

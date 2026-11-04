@@ -1,5 +1,5 @@
 import { apiClient, downloadApiFile } from '../../../services/apiClient';
-import type { AdvanceDetails, AdvanceFilter, AdvanceList, BookCreate, BookFilter, BookPage, BookEntry, BookSummary, CommissionPreview, ExportFilter, RecurringExpense, RecurringInput } from '../types/book';
+import type { AdvanceDetails, AdvanceFilter, AdvanceList, BookCreate, BookFilter, BookPage, BookEntry, BookSummary, CommissionPreview, ExportFilter, ProfitLossReport, RecurringExpense, RecurringInput } from '../types/book';
 const root = '/accounting/book';
 export const accountingBookService = {
   entries: (params: BookFilter) => apiClient.get<BookPage>(`${root}/entries`, { params }).then(r => r.data),
@@ -8,6 +8,7 @@ export const accountingBookService = {
   deleteEntry: (id: string) => apiClient.post(`${root}/entries/${id}/delete`, { confirmed: true }).then(() => undefined),
   deleteSource: (kind: string, id: string) => apiClient.post(`${root}/records/${kind}/${id}/delete`, { confirmed: true }).then(() => undefined),
   summary: (from: string, to: string) => apiClient.get<BookSummary>(`${root}/summary`, { params: { from, to } }).then(r => r.data),
+  profitLoss: (from: string, to: string) => apiClient.get<ProfitLossReport>(`${root}/profit-loss`, { params: { from, to } }).then(r => r.data),
   advances: (params: AdvanceFilter) => apiClient.get<AdvanceList>(`${root}/advances`, { params }).then(r => r.data),
   advanceDetails: (id: string) => apiClient.get<AdvanceDetails>(`${root}/advances/${id}`).then(r => r.data),
   recurring: () => apiClient.get<RecurringExpense[]>(`${root}/recurring`).then(r => r.data),

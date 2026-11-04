@@ -83,6 +83,7 @@ const FinanceJournalDetailsPage = lazy(() => import('../pages/finance/FinanceJou
 const FinanceAccountsPage = lazy(() => import('../pages/finance/FinanceAccountsPage').then((module) => ({ default: module.FinanceAccountsPage })));
 const FinancePeriodsPage = lazy(() => import('../pages/finance/FinancePeriodsPage').then((module) => ({ default: module.FinancePeriodsPage })));
 const FinanceReportsPage = lazy(() => import('../pages/finance/FinanceReportsPage').then((module) => ({ default: module.FinanceReportsPage })));
+const FinanceProfitLossPage = lazy(() => import('../pages/finance/FinanceProfitLossPage').then((module) => ({ default: module.FinanceProfitLossPage })));
 const FinanceCollectionsPage = lazy(() => import('../pages/finance/FinanceCollectionsPage').then((module) => ({ default: module.FinanceCollectionsPage })));
 const FinanceCustodyPage = lazy(() => import('../pages/finance/FinanceCustodyPage').then((module) => ({ default: module.FinanceCustodyPage })));
 const AccountingSalariesPage = lazy(() => import('../pages/accounting/AccountingSalariesPage').then((module) => ({ default: module.AccountingSalariesPage })));
@@ -90,6 +91,7 @@ const AccountingTransportationPage = lazy(() => import('../pages/accounting/Acco
 const AccountingCollectorCommissionsPage = lazy(() => import('../pages/accounting/AccountingCollectorCommissionsPage').then((module) => ({ default: module.AccountingCollectorCommissionsPage })));
 const AccountingSupervisorCommissionsPage = lazy(() => import('../pages/accounting/AccountingSupervisorCommissionsPage').then((module) => ({ default: module.AccountingSupervisorCommissionsPage })));
 const AccountingCommissionRulesPage = lazy(() => import('../pages/accounting/AccountingCommissionRulesPage').then((module) => ({ default: module.AccountingCommissionRulesPage })));
+const FinanceClaimsPage = lazy(() => import('../pages/accounting/FinanceClaimsPage').then((module) => ({ default: module.FinanceClaimsPage })));
 const DataEntryDashboardPage = lazy(() => import('../pages/data-entry/DataEntryDashboardPage').then((module) => ({ default: module.DataEntryDashboardPage })));
 const DataEntryClientsPage = lazy(() => import('../pages/data-entry/DataEntryClientsPage').then((module) => ({ default: module.DataEntryClientsPage })));
 const DataEntryClientDetailsPage = lazy(() => import('../pages/data-entry/DataEntryClientDetailsPage').then((module) => ({ default: module.DataEntryClientDetailsPage })));
@@ -97,8 +99,9 @@ const DataEntryImportPage = lazy(() => import('../pages/data-entry/DataEntryImpo
 const DataEntryFilesPage = lazy(() => import('../pages/data-entry/DataEntryFilesPage').then((module) => ({ default: module.DataEntryFilesPage })));
 const DataEntryHistoryPage = lazy(() => import('../pages/data-entry/DataEntryHistoryPage').then((module) => ({ default: module.DataEntryHistoryPage })));
 const LegalDashboardPage = lazy(() => import('../pages/legal/LegalDashboardPage').then((module) => ({ default: module.LegalDashboardPage })));
-const LegalCasesPage = lazy(() => import('../pages/legal/LegalCasesPage').then((module) => ({ default: module.LegalCasesPage })));
-const LegalCaseDetailsPage = lazy(() => import('../pages/legal/LegalCaseDetailsPage').then((module) => ({ default: module.LegalCaseDetailsPage })));
+const LegalClientsPage = lazy(() => import('../pages/legal/LegalClientsPage').then((module) => ({ default: module.LegalClientsPage })));
+const LegalUploadClientsPage = lazy(() => import('../pages/legal/LegalUploadClientsPage').then((module) => ({ default: module.LegalUploadClientsPage })));
+const LegalClientFilesPage = lazy(() => import('../pages/legal/LegalClientFilesPage').then((module) => ({ default: module.LegalClientFilesPage })));
 const CollectionsDataBatchesPage = lazy(() => import('../pages/collections/CollectionsDataBatchesPage').then((module) => ({ default: module.CollectionsDataBatchesPage })));
 
 function HrRouteBoundary() {
@@ -188,6 +191,8 @@ export function AppRoutes() {
           <Route path="bonuses" element={<AccountingBookPage />} />
           <Route path="judicial-expenses" element={<AccountingBookPage />} />
           <Route path="income" element={<AccountingBookPage />} />
+          <Route path="revenue" element={<AccountingBookPage />} />
+          <Route path="claims" element={<FinanceClaimsPage />} />
           <Route path="advances" element={<AccountingAdvancesPage />} />
           <Route path="recurring" element={<AccountingRecurringPage />} />
           <Route path="commission-calculation" element={<AccountingCommissionCalculationPage />} />
@@ -200,6 +205,7 @@ export function AppRoutes() {
           <Route path="accounts" element={<FinanceAccountsPage />} />
           <Route path="periods" element={<FinancePeriodsPage />} />
           <Route path="reports" element={<FinanceReportsPage />} />
+          <Route path="profit-loss" element={<FinanceProfitLossPage />} />
           <Route path="salaries" element={<AccountingSalariesPage />} />
           <Route path="transportation" element={<AccountingTransportationPage />} />
           <Route path="collector-commissions" element={<AccountingCollectorCommissionsPage />} />
@@ -224,8 +230,10 @@ export function AppRoutes() {
         <Route path="/legal" element={<Navigate to="/legal/dashboard" replace />} />
         <Route path="/legal" element={<LegalRouteBoundary />}>
           <Route path="dashboard" element={<LegalDashboardPage />} />
-          <Route path="cases" element={<LegalCasesPage />} />
-          <Route path="cases/:id" element={<LegalCaseDetailsPage />} />
+          <Route path="clients" element={<LegalClientsPage />} />
+          <Route path="upload-clients" element={<LegalUploadClientsPage />} />
+          <Route path="client-files" element={<LegalClientFilesPage />} />
+          <Route path="client-files/:customerId" element={<LegalClientFilesPage />} />
           <Route path="profile" element={<AccountProfilePage />} />
         </Route>
       </Route>

@@ -24,6 +24,14 @@ public static class AuthorizationPolicies
     public const string FinanceCollectionReview = "FinanceCollectionReview";
     public const string FinanceCustodyView = "FinanceCustodyView";
     public const string FinanceCustodyReconcile = "FinanceCustodyReconcile";
+    public const string FinanceClaimsView = "FinanceClaimsView";
+    public const string FinanceClaimsCreate = "FinanceClaimsCreate";
+    public const string FinanceClaimsEdit = "FinanceClaimsEdit";
+    public const string FinanceClaimsImport = "FinanceClaimsImport";
+    public const string FinanceClaimsConfirmReceipt = "FinanceClaimsConfirmReceipt";
+    public const string FinanceClaimsReverseReceipt = "FinanceClaimsReverseReceipt";
+    public const string FinanceClaimsCancel = "FinanceClaimsCancel";
+    public const string FinanceClaimsExport = "FinanceClaimsExport";
     public const string AccountingAccess = "AccountingAccess";
     public const string AccountingPayrollManage = "AccountingPayrollManage";
     public const string AccountingPayrollApprove = "AccountingPayrollApprove";
