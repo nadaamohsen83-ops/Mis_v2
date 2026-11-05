@@ -10,8 +10,8 @@ export interface Advance { id: string; documentNumber: string; employeeId: strin
 export interface AdvanceList { items: Advance[]; totalAmount: number; totalPaid: number; totalRemaining: number; openCount: number }
 export interface AdvancePayment { id: string; date: string; amount: number; status: string; paymentMethod?: string | null; reference?: string | null; notes?: string | null; createdBy: string; createdAt: string; remainingAfter: number }
 export interface AdvanceDetails { advance: Advance; employeeTotalOutstanding: number; payments: AdvancePayment[] }
-export interface AdvanceFilter { from?: string; to?: string; employeeName?: string; employeeNumber?: string; departmentId?: string; status?: string }
+export interface AdvanceFilter { from?: string; to?: string; employeeName?: string; employeeNumber?: string; departmentId?: string; status?: string; asOf?: string; search?: string; carriedOnly?: boolean }
 export interface RecurringExpense { id: string; name: string; amount: number; dueDay: number; accountId: string; cashAccountId: string; startsOn: string; endsOn?: string; notes?: string; isActive: boolean }
 export type RecurringInput = Omit<RecurringExpense, 'id' | 'endsOn'> & { endsOn?: string | null };
 export interface CommissionPreview { year: number; month: number; approvedCollections: number; missingRuleScopes: string[]; rows: { scope: string; userId: string; name: string; caseCount: number; collected: number; commission: number; ruleCode: string; basis: string; percentage?: number; fixedAmount?: number; locked: boolean }[] }
-export interface ExportFilter extends BookFilter { year?: number; month?: number; periodId?: string; asOf?: string; departmentId?: string; employeeName?: string; employeeNumber?: string }
+export interface ExportFilter extends BookFilter { year?: number; month?: number; periodId?: string; asOf?: string; departmentId?: string; employeeName?: string; employeeNumber?: string; carriedOnly?: boolean }

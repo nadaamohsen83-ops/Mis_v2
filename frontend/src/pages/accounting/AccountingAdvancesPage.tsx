@@ -1,5 +1,6 @@
 import { Eye, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Button } from '../../components/common/Button';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { Modal } from '../../components/common/Modal';
@@ -33,6 +34,7 @@ const formDefaults = (category: string): AdvanceForm => ({
 
 export function AccountingAdvancesPage() {
   const a = useAccountingText();
+  const isCarriedPage = useLocation().pathname === '/finance/carried-advances';
   const { isRtl, language, t } = useLocalization();
   const tx = (key: TranslationKey) => t(key);
   const { user } = useAuth();
@@ -52,8 +54,11 @@ export function AccountingAdvancesPage() {
   const [status, setStatus] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [asOf, setAsOf] = useState(cairoToday());
+  const [employeeOrDocument, setEmployeeOrDocument] = useState('');
   const nameQuery = useDebounced(employeeName);
   const numberQuery = useDebounced(employeeNumber);
+  const searchQuery = useDebounced(employeeOrDocument);
   const [formMode, setFormMode] = useState<'advance' | 'payment'>();
   const [selectedAdvance, setSelectedAdvance] = useState<Advance>();
   const [form, setForm] = useState<AdvanceForm>(formDefaults('ADVANCE'));
@@ -68,13 +73,17 @@ export function AccountingAdvancesPage() {
   const [reversing, setReversing] = useState(false);
 
   const filter = useMemo<AdvanceFilter>(() => ({
-    from: from || undefined,
-    to: to || undefined,
-    employeeName: nameQuery || undefined,
-    employeeNumber: numberQuery || undefined,
-    departmentId: departmentId || undefined,
-    status: status || undefined,
-  }), [departmentId, from, nameQuery, numberQuery, status, to]);
+    ...(isCarriedPage
+      ? { asOf, search: searchQuery || undefined, status: status || undefined, carriedOnly: true }
+      : {
+          from: from || undefined,
+          to: to || undefined,
+          employeeName: nameQuery || undefined,
+          employeeNumber: numberQuery || undefined,
+          departmentId: departmentId || undefined,
+          status: status || undefined,
+        }),
+  }), [asOf, departmentId, from, isCarriedPage, nameQuery, numberQuery, searchQuery, status, to]);
 
   useEffect(() => {
     let active = true;
@@ -121,20 +130,23 @@ export function AccountingAdvancesPage() {
   };
 
   const openAdvanceForm = async (mode: 'advance' | 'payment', advance?: Advance) => {
+    const category = mode === 'payment' ? 'ADVANCE_REPAYMENT' : isCarriedPage ? 'CARRIED_ADVANCE' : 'ADVANCE';
     setFormMode(mode);
     setSelectedAdvance(advance);
     setFormError('');
     setFormLoading(true);
-    setForm(formDefaults(mode === 'advance' ? 'ADVANCE' : 'ADVANCE_REPAYMENT'));
+    setForm(formDefaults(category));
     try {
       const accountOptions = await financeService.accounts();
       setAccounts(accountOptions);
       const usable = accountOptions.filter(x => x.isActive && x.postingAllowed && !x.controlAccountType);
-      const category = mode === 'advance' ? 'ADVANCE' : 'ADVANCE_REPAYMENT';
+      const counterAccount = category === 'CARRIED_ADVANCE'
+        ? usable.find(x => x.code === '310100' && !x.isCashAccount) ?? usable.find(x => x.accountType === 'EQUITY')
+        : usable.find(x => x.isCashAccount);
       setForm({
         ...formDefaults(category),
         accountId: advance?.accountId ?? usable.find(x => x.code === '113100' && !x.isCashAccount)?.id ?? '',
-        counterAccountId: usable.find(x => x.isCashAccount)?.id ?? '',
+        counterAccountId: counterAccount?.id ?? '',
         employeeId: advance?.employeeId,
         relatedAdvanceId: advance?.id,
         description: mode === 'payment' && advance ? t('advancesRepaymentReason', { documentNumber: advance.documentNumber }) : '',
@@ -159,8 +171,9 @@ export function AccountingAdvancesPage() {
     if (!form.amount || form.amount <= 0) { setFormError(tx('advancesPositiveAmount')); return; }
     if (!form.transactionDate) { setFormError(tx('advancesDateRequired')); return; }
     if (formMode === 'advance' && !form.description.trim()) { setFormError(tx('advancesAdvanceReasonRequired')); return; }
-    if (!form.paymentMethod) { setFormError(tx('advancesPaymentMethodRequired')); return; }
+    if (form.category !== 'CARRIED_ADVANCE' && !form.paymentMethod) { setFormError(tx('advancesPaymentMethodRequired')); return; }
     if (!form.accountId || !form.counterAccountId) { setFormError(tx('advancesAccountsRequired')); return; }
+    if (form.category === 'CARRIED_ADVANCE' && !form.reference?.trim()) { setFormError(tx('carriedAdvancesReferenceRequired')); return; }
     if (formMode === 'payment' && selectedAdvance && form.amount > selectedAdvance.remaining) {
       setFormError(tx('advancesOverpayment'));
       return;
@@ -205,6 +218,7 @@ export function AccountingAdvancesPage() {
   const clearFilters = () => {
     setEmployeeName('');
     setEmployeeNumber('');
+    setEmployeeOrDocument('');
     setDepartmentId('');
     setStatus('');
     setFrom('');
@@ -232,69 +246,109 @@ export function AccountingAdvancesPage() {
   };
 
   const exportFilter = {
-    from: from || '2000-01-01',
-    to: to || cairoToday(),
-    employeeName: nameQuery || undefined,
-    employeeNumber: numberQuery || undefined,
-    departmentId: departmentId || undefined,
-    status: status || undefined,
+    ...(isCarriedPage
+      ? { asOf, search: searchQuery || undefined, status: status || undefined, carriedOnly: true }
+      : {
+          from: from || '2000-01-01',
+          to: to || cairoToday(),
+          employeeName: nameQuery || undefined,
+          employeeNumber: numberQuery || undefined,
+          departmentId: departmentId || undefined,
+          status: status || undefined,
+        }),
   };
 
   return <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'} lang={language}>
-    <BookHeader eyebrow={tx('advancesPageEyebrow')} title={tx('advancesTitle')} description={tx('advancesDescription')}>
+    <BookHeader
+      eyebrow={tx('advancesPageEyebrow')}
+      title={isCarriedPage ? tx('carriedAdvancesTitle') : tx('advancesTitle')}
+      description={isCarriedPage ? tx('carriedAdvancesDescription') : tx('advancesDescription')}
+    >
       <AccountingExportButton report="advances" filter={exportFilter} label={tx('advancesExportExcel')} errorMessage={tx('advancesExportError')} />
-      {canCreateAdvance ? <AddButton onClick={() => void openAdvanceForm('advance')}>{tx('advancesDisburse')}</AddButton> : null}
+      {canCreateAdvance ? <AddButton onClick={() => void openAdvanceForm('advance')}>{isCarriedPage ? tx('carriedAdvancesAddBalance') : tx('advancesDisburse')}</AddButton> : null}
     </BookHeader>
     <BookError error={error || employeeError} />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <AccountingKpi label={tx('advancesTotalAdvances')} value={a.money(summary.totalAmount)} />
-      <AccountingKpi label={tx('advancesTotalPaid')} value={a.money(summary.totalPaid)} />
-      <AccountingKpi label={tx('advancesTotalRemaining')} value={a.money(summary.totalRemaining)} />
-      <AccountingKpi label={tx('advancesOpenCount')} value={a.number(summary.openCount)} />
+    <div className={`grid gap-4 sm:grid-cols-2 ${isCarriedPage ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
+      <AccountingKpi label={isCarriedPage ? tx('carriedAdvancesOriginal') : tx('advancesTotalAdvances')} value={a.money(summary.totalAmount)} />
+      <AccountingKpi label={isCarriedPage ? tx('carriedAdvancesSettled') : tx('advancesTotalPaid')} value={a.money(summary.totalPaid)} />
+      <AccountingKpi label={isCarriedPage ? tx('carriedAdvancesRemaining') : tx('advancesTotalRemaining')} value={a.money(summary.totalRemaining)} />
+      {!isCarriedPage ? <AccountingKpi label={tx('advancesOpenCount')} value={a.number(summary.openCount)} /> : null}
     </div>
-    <section className={`${panel} grid gap-4 sm:grid-cols-2 xl:grid-cols-6`}>
-      <BookField label={tx('advancesEmployeeName')}><input className="field" value={employeeName} onChange={e => setEmployeeName(e.target.value)} /></BookField>
-      <BookField label={tx('advancesEmployeeCode')}><input dir="ltr" className="field" value={employeeNumber} onChange={e => setEmployeeNumber(e.target.value)} /></BookField>
-      <BookField label={tx('advancesDepartment')}><ProfessionalSelect className="field" value={departmentId} onChange={e => setDepartmentId(e.target.value)}><option value="">{tx('advancesAllDepartments')}</option>{departments.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</ProfessionalSelect></BookField>
-      <BookField label={tx('advancesStatus')}><ProfessionalSelect className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="">{tx('advancesAllStatuses')}</option><option value="OPEN">{tx('advancesOpen')}</option><option value="PARTIAL">{tx('advancesPartiallySettled')}</option><option value="SETTLED">{tx('advancesFullySettled')}</option></ProfessionalSelect></BookField>
-      <BookField label={tx('advancesFromDate')}><DateControl dir="ltr" className="w-full" value={from} onChange={e => setFrom(e.target.value)} /></BookField>
-      <div className="flex items-end gap-2"><BookField label={tx('advancesToDate')}><DateControl dir="ltr" className="w-full" value={to} onChange={e => setTo(e.target.value)} /></BookField><ClearButton label={tx('advancesClearFilters')} onClick={clearFilters} /></div>
-    </section>
+    {isCarriedPage ? (
+      <section className={`${panel} grid gap-4 sm:grid-cols-3`}>
+        <BookField label={tx('carriedAdvancesAsOf')}><DateControl dir="ltr" className="w-full" value={asOf} onChange={e => setAsOf(e.target.value)} /></BookField>
+        <BookField label={tx('carriedAdvancesSearch')}><input className="field" value={employeeOrDocument} onChange={e => setEmployeeOrDocument(e.target.value)} /></BookField>
+        <div className="flex items-end gap-2">
+          <BookField label={tx('advancesStatus')}><ProfessionalSelect className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="">{tx('advancesAllStatuses')}</option><option value="OPEN">{tx('advancesOpen')}</option><option value="PARTIAL">{tx('advancesPartiallySettled')}</option><option value="SETTLED">{tx('advancesFullySettled')}</option></ProfessionalSelect></BookField>
+          <ClearButton label={tx('advancesClearFilters')} onClick={() => { setEmployeeOrDocument(''); setStatus(''); }} />
+        </div>
+      </section>
+    ) : (
+      <section className={`${panel} grid gap-4 sm:grid-cols-2 xl:grid-cols-6`}>
+        <BookField label={tx('advancesEmployeeName')}><input className="field" value={employeeName} onChange={e => setEmployeeName(e.target.value)} /></BookField>
+        <BookField label={tx('advancesEmployeeCode')}><input dir="ltr" className="field" value={employeeNumber} onChange={e => setEmployeeNumber(e.target.value)} /></BookField>
+        <BookField label={tx('advancesDepartment')}><ProfessionalSelect className="field" value={departmentId} onChange={e => setDepartmentId(e.target.value)}><option value="">{tx('advancesAllDepartments')}</option>{departments.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</ProfessionalSelect></BookField>
+        <BookField label={tx('advancesStatus')}><ProfessionalSelect className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="">{tx('advancesAllStatuses')}</option><option value="OPEN">{tx('advancesOpen')}</option><option value="PARTIAL">{tx('advancesPartiallySettled')}</option><option value="SETTLED">{tx('advancesFullySettled')}</option></ProfessionalSelect></BookField>
+        <BookField label={tx('advancesFromDate')}><DateControl dir="ltr" className="w-full" value={from} onChange={e => setFrom(e.target.value)} /></BookField>
+        <div className="flex items-end gap-2"><BookField label={tx('advancesToDate')}><DateControl dir="ltr" className="w-full" value={to} onChange={e => setTo(e.target.value)} /></BookField><ClearButton label={tx('advancesClearFilters')} onClick={clearFilters} /></div>
+      </section>
+    )}
     <div className="overflow-hidden rounded-2xl border border-mis-border bg-white">
       <div className="overflow-x-auto"><table className={table}>
-        <thead><tr>{[
-          tx('advancesEmployeeCode'), tx('advancesEmployeeName'), tx('advancesDepartment'), tx('advancesAdvanceDate'),
-          tx('advancesOriginalAmount'), tx('advancesPaid'), tx('advancesRemaining'), tx('advancesReason'), tx('advancesStatusLabel'), tx('advancesActions'),
-        ].map((label, i) => <th key={i} className={cell}>{label}</th>)}</tr></thead>
-        <tbody>{rows.map(row => <tr key={row.id} className="cursor-pointer" onClick={() => { setSelectedAdvance(row); void loadDetails(row.id); }}>
-          <td dir="ltr" className={`${cell} font-mono text-xs`}>{row.employeeNumber}</td>
-          <td className={`${cell} font-bold text-mis-navy`}>{row.employeeName}</td>
-          <td className={cell}>{row.departmentName || tx('advancesMissingValue')}</td>
-          <td className={cell}>{a.date(row.date)}</td>
-          <td className={cell} data-bidi="ltr">{a.money(row.amount)}</td>
-          <td className={cell} data-bidi="ltr">{a.money(row.repaid)}</td>
-          <td className={`${cell} font-bold text-mis-primary`} data-bidi="ltr">{a.money(row.remaining)}</td>
-          <td className={`${cell} max-w-64 truncate`} title={row.reason}>{row.reason}</td>
-          <td className={cell}>{statusBadge(row.status)}</td>
-          <td className={cell}><Button fullWidth={false} variant="outline" size="sm" leftIcon={<Eye className="h-4 w-4" />} onClick={e => { e.stopPropagation(); setSelectedAdvance(row); void loadDetails(row.id); }}>{tx('advancesViewDetails')}</Button></td>
-        </tr>)}</tbody>
+        {isCarriedPage ? <>
+          <thead><tr>{[
+            tx('advancesEmployeeName'), tx('advancesAdvanceDate'), tx('advancesOriginalAmount'),
+            tx('advancesPaid'), tx('advancesRemaining'), tx('carriedAdvancesType'), tx('advancesActions'),
+          ].map((label, i) => <th key={i} className={cell}>{label}</th>)}</tr></thead>
+          <tbody>{rows.map(row => <tr key={row.id}>
+            <td className={cell}><p className="font-bold text-mis-navy">{row.employeeName}</p><p dir="ltr" className="font-mono text-xs">{row.employeeNumber} · {row.documentNumber}</p>{row.reference ? <p className="text-xs text-slate-500">{row.reference}</p> : null}</td>
+            <td className={cell}>{a.date(row.date)}</td>
+            <td className={cell} data-bidi="ltr">{a.money(row.amount)}</td>
+            <td className={cell} data-bidi="ltr">{a.money(row.repaid)}</td>
+            <td className={`${cell} font-bold text-mis-primary`} data-bidi="ltr">{a.money(row.remaining)}</td>
+            <td className={cell}>{tx('carriedAdvancesCarriedType')}</td>
+            <td className={cell}><Button fullWidth={false} variant="outline" size="sm" leftIcon={<Eye className="h-4 w-4" />} onClick={() => { setSelectedAdvance(row); void loadDetails(row.id); }}>{tx('carriedAdvancesHistory')}</Button></td>
+          </tr>)}</tbody>
+        </> : <>
+          <thead><tr>{[
+            tx('advancesEmployeeCode'), tx('advancesEmployeeName'), tx('advancesDepartment'), tx('advancesAdvanceDate'),
+            tx('advancesOriginalAmount'), tx('advancesPaid'), tx('advancesRemaining'), tx('advancesReason'), tx('advancesStatusLabel'), tx('advancesActions'),
+          ].map((label, i) => <th key={i} className={cell}>{label}</th>)}</tr></thead>
+          <tbody>{rows.map(row => <tr key={row.id} className="cursor-pointer" onClick={() => { setSelectedAdvance(row); void loadDetails(row.id); }}>
+            <td dir="ltr" className={`${cell} font-mono text-xs`}>{row.employeeNumber}</td>
+            <td className={`${cell} font-bold text-mis-navy`}>{row.employeeName}</td>
+            <td className={cell}>{row.departmentName || tx('advancesMissingValue')}</td>
+            <td className={cell}>{a.date(row.date)}</td>
+            <td className={cell} data-bidi="ltr">{a.money(row.amount)}</td>
+            <td className={cell} data-bidi="ltr">{a.money(row.repaid)}</td>
+            <td className={`${cell} font-bold text-mis-primary`} data-bidi="ltr">{a.money(row.remaining)}</td>
+            <td className={`${cell} max-w-64 truncate`} title={row.reason}>{row.reason}</td>
+            <td className={cell}>{statusBadge(row.status)}</td>
+            <td className={cell}><Button fullWidth={false} variant="outline" size="sm" leftIcon={<Eye className="h-4 w-4" />} onClick={e => { e.stopPropagation(); setSelectedAdvance(row); void loadDetails(row.id); }}>{tx('advancesViewDetails')}</Button></td>
+          </tr>)}</tbody>
+        </>}
       </table></div>
       {loading ? <p className="p-8 text-center text-sm text-slate-500">{tx('advancesLoading')}</p> : !rows.length && !error ? <BookEmpty title={tx('advancesNoAdvances')} /> : null}
     </div>
 
-    <Modal open={!!formMode} onClose={closeForm} title={formMode === 'payment' ? tx('advancesRegisterPayment') : tx('advancesNewAdvance')} size="lg">
+    <Modal
+      open={!!formMode}
+      onClose={closeForm}
+      title={formMode === 'payment' ? tx('advancesRegisterPayment') : isCarriedPage ? tx('carriedAdvancesAddBalance') : tx('advancesNewAdvance')}
+      size="lg"
+    >
       <BookError error={formError} />
       {formLoading ? <p className="p-5 text-slate-500">{tx('advancesLoadingAccounts')}</p> : <form noValidate onSubmit={saveForm} className="grid gap-4 sm:grid-cols-2">
         {formMode === 'advance' ? <>
           <BookField label={tx('advancesEmployee')}><ProfessionalSelect required className="field" value={form.employeeId ?? ''} onChange={e => setForm({ ...form, employeeId: e.target.value || undefined })}><option value="">{tx('advancesSelectEmployee')}</option>{employees.map(x => <option key={x.id} value={x.id}>{x.employeeNumber} · {x.fullName}</option>)}</ProfessionalSelect></BookField>
           <BookField label={tx('advancesEmployeeCode')}><input dir="ltr" className="field bg-slate-50" value={employee?.employeeNumber ?? ''} readOnly /></BookField>
           <BookField label={tx('advancesDepartment')}><input className="field bg-slate-50" value={employee?.departmentName ?? ''} readOnly /></BookField>
-          <BookField label={tx('advancesAdvanceAmount')}><input required className="field" type="number" min="0.01" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} /></BookField>
-          <BookField label={tx('advancesAdvanceDate')}><DateControl dir="ltr" required max={cairoToday()} className="w-full" value={form.transactionDate} onChange={e => setForm({ ...form, transactionDate: e.target.value })} /></BookField>
-          <BookField label={tx('advancesPaymentMethod')}><ProfessionalSelect required className="field" value={form.paymentMethod ?? ''} onChange={e => setForm({ ...form, paymentMethod: e.target.value })}><option value="">{tx('advancesSelectDisbursementMethod')}</option>{methodOptions.map(x => <option key={x[0]} value={x[0]}>{x[1]}</option>)}</ProfessionalSelect></BookField>
-          <BookField label={tx('advancesCashBankAccount')}><ProfessionalSelect required className="field" value={form.counterAccountId} onChange={e => setForm({ ...form, counterAccountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{usableAccounts.filter(x => x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
+          <BookField label={isCarriedPage ? tx('carriedAdvancesOriginalAmount') : tx('advancesAdvanceAmount')}><input required className="field" type="number" min="0.01" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} /></BookField>
+          <BookField label={isCarriedPage ? tx('carriedAdvancesBalanceDate') : tx('advancesAdvanceDate')}><DateControl dir="ltr" required max={cairoToday()} className="w-full" value={form.transactionDate} onChange={e => setForm({ ...form, transactionDate: e.target.value })} /></BookField>
+          {isCarriedPage ? null : <BookField label={tx('advancesPaymentMethod')}><ProfessionalSelect required className="field" value={form.paymentMethod ?? ''} onChange={e => setForm({ ...form, paymentMethod: e.target.value })}><option value="">{tx('advancesSelectDisbursementMethod')}</option>{methodOptions.map(x => <option key={x[0]} value={x[0]}>{x[1]}</option>)}</ProfessionalSelect></BookField>}
+          <BookField label={isCarriedPage ? tx('carriedAdvancesOpeningAccount') : tx('advancesCashBankAccount')}><ProfessionalSelect required className="field" value={form.counterAccountId} onChange={e => setForm({ ...form, counterAccountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{isCarriedPage ? usableAccounts.filter(x => x.accountType === 'EQUITY').map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>) : usableAccounts.filter(x => x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
           <BookField label={tx('advancesAccountingAccount')}><ProfessionalSelect required className="field" value={form.accountId} onChange={e => setForm({ ...form, accountId: e.target.value })}><option value="">{tx('advancesSelectAccount')}</option>{usableAccounts.filter(x => x.accountType === 'ASSET' && !x.isCashAccount).map(x => <option key={x.id} value={x.id}>{accountName(x)}</option>)}</ProfessionalSelect></BookField>
-          <BookField label={`${tx('advancesReferenceNumber')} ${tx('advancesOptional')}`}><input dir="ltr" className="field" maxLength={160} value={form.reference ?? ''} onChange={e => setForm({ ...form, reference: e.target.value })} /></BookField>
+          <BookField label={isCarriedPage ? tx('carriedAdvancesReference') : `${tx('advancesReferenceNumber')} ${tx('advancesOptional')}`}><input dir="ltr" required={isCarriedPage} className="field" maxLength={160} value={form.reference ?? ''} onChange={e => setForm({ ...form, reference: e.target.value })} /></BookField>
           <div className="sm:col-span-2"><BookField label={tx('advancesReason')}><textarea required maxLength={1000} className="field min-h-20" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></BookField></div>
           <div className="sm:col-span-2"><BookField label={`${tx('advancesNotes')} ${tx('advancesOptional')}`}><textarea maxLength={1000} className="field min-h-20" value={form.notes ?? ''} onChange={e => setForm({ ...form, notes: e.target.value })} /></BookField></div>
         </> : <>
@@ -306,11 +360,11 @@ export function AccountingAdvancesPage() {
           <BookField label={`${tx('advancesReferenceNumber')} ${tx('advancesOptional')}`}><input dir="ltr" className="field" maxLength={160} value={form.reference ?? ''} onChange={e => setForm({ ...form, reference: e.target.value })} /></BookField>
           <div className="sm:col-span-2"><BookField label={`${tx('advancesNotes')} ${tx('advancesOptional')}`}><textarea maxLength={1000} className="field min-h-20" value={form.notes ?? ''} onChange={e => setForm({ ...form, notes: e.target.value })} /></BookField></div>
         </>}
-        <div className="flex gap-2 sm:col-span-2"><Button type="submit" fullWidth={false} isLoading={saving}>{formMode === 'payment' ? tx('advancesSavePayment') : tx('advancesSaveAdvance')}</Button><Button type="button" variant="outline" fullWidth={false} onClick={closeForm}>{tx('advancesCancel')}</Button></div>
+        <div className="flex gap-2 sm:col-span-2"><Button type="submit" fullWidth={false} isLoading={saving}>{formMode === 'payment' ? tx('advancesSavePayment') : isCarriedPage ? tx('carriedAdvancesSaveBalance') : tx('advancesSaveAdvance')}</Button><Button type="button" variant="outline" fullWidth={false} onClick={closeForm}>{tx('advancesCancel')}</Button></div>
       </form>}
     </Modal>
 
-    <Modal open={!!selectedAdvance && !formMode} onClose={() => { setSelectedAdvance(undefined); setDetails(undefined); }} title={tx('advancesDetails')} size="xl">
+    <Modal open={!!selectedAdvance && !formMode} onClose={() => { setSelectedAdvance(undefined); setDetails(undefined); }} title={isCarriedPage ? tx('carriedAdvancesHistory') : tx('advancesDetails')} size="xl">
       {detailsLoading || !details ? <p className="p-5 text-slate-500">{tx('advancesLoadingDetails')}</p> : <div className="space-y-5">
         <BookError error={error} />
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-mis-navy">{details.advance.employeeName}</h3><p className="text-sm text-slate-500"><span dir="ltr">{details.advance.employeeNumber}</span> · {details.advance.departmentName || tx('advancesMissingValue')}</p></div><div className="flex flex-wrap gap-2">{canCreateAdvance && details.advance.remaining > 0 && <Button fullWidth={false} onClick={() => void openAdvanceForm('payment', details.advance)}>{tx('advancesRegisterPayment')}</Button>}{canReverseAdvance ? <Button fullWidth={false} variant="outline" leftIcon={<RotateCcw className="h-4 w-4" />} disabled={details.payments.some(payment => payment.status === 'POSTED')} onClick={() => { setReverseReason(''); setReverseTarget({ id: details.advance.id, isPayment: false, label: details.advance.documentNumber }); }}>{tx('advancesVoid')}</Button> : null}</div></div>

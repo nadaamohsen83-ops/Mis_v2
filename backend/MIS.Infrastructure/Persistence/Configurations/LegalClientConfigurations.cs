@@ -12,10 +12,13 @@ public sealed class LegalClientAssignmentConfiguration : IEntityTypeConfiguratio
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.Notes).HasMaxLength(2000);
+        builder.Property(x => x.ExternalIdentifier).HasMaxLength(128);
+        builder.Property(x => x.ImportedFieldsJson).HasColumnType("jsonb");
         builder.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.UpdatedByUser).WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.CustomerId).IsUnique();
+        builder.HasIndex(x => x.ExternalIdentifier).HasFilter("\"ExternalIdentifier\" IS NOT NULL");
         builder.HasIndex(x => x.UpdatedAt);
     }
 }

@@ -53,7 +53,8 @@ public sealed record LegalClientDetailsDto(
     DateTimeOffset CreatedAt,
     IReadOnlyList<string> CollectionCaseNumbers,
     IReadOnlyList<LegalClientDocumentDto> Documents,
-    bool CanManage);
+    bool CanManage,
+    IReadOnlyList<IReadOnlyDictionary<string, string>>? ImportedRecords);
 
 public sealed record UpdateLegalClientRequest(string? Status, string? Notes);
 
@@ -68,7 +69,9 @@ public sealed record LegalClientImportSourceRow(
     string? Address,
     string? AddressArabic,
     string? AddressEnglish,
-    string? Notes);
+    string? Notes,
+    string? ExternalIdentifier = null,
+    IReadOnlyDictionary<string, string>? OriginalFields = null);
 
 public sealed record LegalClientImportPreviewRowDto(
     LegalClientImportSourceRow Source,
@@ -85,7 +88,10 @@ public sealed record LegalClientImportPreviewDto(
     int DuplicateRows,
     IReadOnlyCollection<LegalClientImportPreviewRowDto> Rows);
 
-public sealed record LegalClientImportRequest(string FileName, IReadOnlyCollection<LegalClientImportSourceRow> Rows);
+public sealed record LegalClientImportRequest(
+    string FileName,
+    Guid OrganizationId,
+    IReadOnlyCollection<LegalClientImportSourceRow> Rows);
 
 public sealed record LegalClientImportRowResultDto(int RowNumber, string Status, IReadOnlyCollection<string> Errors);
 

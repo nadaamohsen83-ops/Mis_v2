@@ -98,10 +98,30 @@ public sealed partial class AccountingBookService
         }
         if (all || report == "advances")
         {
-            var entries = await AdvancesAsync(new(from, to, filter.EmployeeName ?? filter.Search, filter.EmployeeNumber ?? filter.Search, filter.DepartmentId, filter.Status), token);
-            Add(T("السلف والتسويات", "Advances and settlements"),
-                [T("كود الموظف", "Employee Code"), T("اسم الموظف", "Employee Name"), T("الإدارة", "Department"), T("رقم المستند", "Document"), T("تاريخ السلفة", "Advance Date"), T("أصل السلفة", "Original Amount"), T("إجمالي المسدد", "Total Paid"), T("المتبقي", "Remaining"), T("سبب السلفة", "Advance Reason"), T("الحالة", "Status")],
-                entries.Items.Select(x => new object?[] { x.EmployeeNumber, x.EmployeeName, x.DepartmentName, x.DocumentNumber, x.Date, x.Amount, x.Repaid, x.Remaining, x.Reason, AdvanceStatusName(x.Status, ar) }));
+            var entries = await AdvancesAsync(new(
+                from,
+                to,
+                filter.EmployeeName,
+                filter.EmployeeNumber,
+                filter.DepartmentId,
+                filter.Status,
+                AsOf: filter.AsOf,
+                Search: filter.Search,
+                CarriedOnly: filter.CarriedOnly), token);
+            var advanceRows = entries.Items
+                .Select(x => filter.CarriedOnly
+                    ? new object?[] { x.EmployeeName, x.EmployeeNumber, x.Reference, x.Date, x.Amount, x.Repaid, x.Remaining, x.Carried ? T("مرحلة", "Carried") : T("الشهر الحالي", "Current period") }
+                    : new object?[] { x.EmployeeNumber, x.EmployeeName, x.DepartmentName, x.DocumentNumber, x.Date, x.Amount, x.Repaid, x.Remaining, x.Reason, AdvanceStatusName(x.Status, ar) })
+                .ToList();
+            string[] headers = filter.CarriedOnly
+                ? [T("اسم الموظف", "Employee"), T("كود الموظف", "Employee Code"), T("المرجع", "Reference"), T("التاريخ", "Date"), T("أصل السلفة", "Original Advance"), T("المسدد", "Settled"), T("المتبقي", "Remaining"), T("النوع", "Type")]
+                : [T("كود الموظف", "Employee Code"), T("اسم الموظف", "Employee Name"), T("الإدارة", "Department"), T("رقم المستند", "Document"), T("تاريخ السلفة", "Advance Date"), T("أصل السلفة", "Original Amount"), T("إجمالي المسدد", "Total Paid"), T("المتبقي", "Remaining"), T("سبب السلفة", "Advance Reason"), T("الحالة", "Status")];
+            advanceRows.Add(filter.CarriedOnly
+                ? [T("الإجمالي", "TOTAL"), null, null, null, entries.TotalAmount, entries.TotalPaid, entries.TotalRemaining, null]
+                : [T("الإجمالي", "TOTAL"), null, null, null, null, entries.TotalAmount, entries.TotalPaid, entries.TotalRemaining, null, null]);
+            Add(filter.CarriedOnly ? T("السلف المرحلة", "Carried advances") : T("السلف والتسويات", "Advances and settlements"),
+                headers,
+                advanceRows);
         }
         if (all || report == "recurring")
         {

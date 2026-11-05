@@ -20,6 +20,7 @@ export function FinanceLayout() {
     { to: '/finance/recurring', icon: CalendarRange, label: ar ? 'إعداد المصاريف الثابتة' : 'Recurring expense settings', group: ar ? 'مصروفات الشركة' : 'Company expenses' },
     ...(canViewClaims ? [{ to: '/finance/claims', icon: FileSpreadsheet, label: ar ? 'المطالبات' : 'Claims', group: finance }] : []),
     { to: '/finance/advances', icon: WalletCards, label: t('advancesTitle'), group: payroll },
+    { to: '/finance/carried-advances', icon: WalletCards, label: t('carriedAdvancesTitle'), group: payroll },
     { to: '/finance/commission-calculation', icon: Percent, label: ar ? 'حساب العمولات' : 'Commission calculator', group: payroll },
     { to: '/finance/exports', icon: BarChart3, label: ar ? 'مركز السحبات Excel' : 'Excel export center', group: finance },
     { to: '/finance/collections', icon: ReceiptText, label: ar ? 'التحصيلات المالية' : 'Financial collections', group: finance },

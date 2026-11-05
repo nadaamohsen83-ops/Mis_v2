@@ -56,6 +56,7 @@ export interface LegalClientDetails {
   collectionCaseNumbers: string[];
   documents: LegalClientDocument[];
   canManage: boolean;
+  importedRecords?: Array<Record<string, string>> | null;
 }
 
 export interface LegalClientImportSourceRow {
@@ -70,6 +71,8 @@ export interface LegalClientImportSourceRow {
   addressArabic?: string | null;
   addressEnglish?: string | null;
   notes?: string | null;
+  externalIdentifier?: string | null;
+  originalFields?: Record<string, string> | null;
 }
 
 export interface LegalClientImportPreviewRow {

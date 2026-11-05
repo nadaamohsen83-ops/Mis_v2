@@ -50,7 +50,7 @@ public sealed class AccountingBookIntegrationTests
                   emptyProfitLoss.RevenueCategories.Count == 0 && emptyProfitLoss.ExpenseCategories.Count == 0,
                 "an empty accounting period returns a successful zero profit and loss report");
             await Assert.ThrowsAsync<HrValidationException>(() => bm.ProfitLossAsync(today, today.AddDays(-1), default));
-            async Task<AccountingBookEntryDto> Create(string cat, decimal amount, DateOnly? date = null, Guid? related = null) => await bm.CreateAsync(new(cat, date ?? today, amount, Account(MIS.Domain.Constants.AccountingBookValues.AccountCode(cat)), Account(cat == "CARRIED_ADVANCE" ? "310100" : "110300"), "Isolated test " + cat, null, cat.Contains("ADVANCE") ? employee.Id : null, related, Guid.NewGuid()), default);
+            async Task<AccountingBookEntryDto> Create(string cat, decimal amount, DateOnly? date = null, Guid? related = null, string? reference = null) => await bm.CreateAsync(new(cat, date ?? today, amount, Account(MIS.Domain.Constants.AccountingBookValues.AccountCode(cat)), Account(cat == "CARRIED_ADVANCE" ? "310100" : "110300"), "Isolated test " + cat, reference, cat.Contains("ADVANCE") ? employee.Id : null, related, Guid.NewGuid()), default);
             async Task Post(AccountingBookEntryDto d) { Assert.Equal("POSTED", d.Status); Assert.Equal("POSTED", (await bm.TransitionAsync(d.Id, "record", null, default)).Status); }
             void Check(bool value, string name) { if (!value) throw new Exception("FAIL " + name); Console.WriteLine("PASS " + name); }
             async Task Conflict(Func<Task> run, string label) { try { await run(); throw new Exception("Expected conflict: " + label); } catch (HrConflictException) { Console.WriteLine("PASS " + label); } }
@@ -59,9 +59,27 @@ public sealed class AccountingBookIntegrationTests
             var income = await Create("INCOME", 1000); await Post(income);
             Assert.Equal("COMPANY_INCOME", await db.JournalEntries.Where(x => x.Id == income.JournalEntryId).Select(x => x.EntryType).SingleAsync());
             var advance = await Create("ADVANCE", 400, today.AddDays(-2)); await Post(advance);
-            var opening = await Create("CARRIED_ADVANCE", 200, today.AddDays(-3)); await Post(opening);
+            var opening = await Create("CARRIED_ADVANCE", 200, today.AddDays(-3), reference: "CARRY-001"); await Post(opening);
             var repay = await Create("ADVANCE_REPAYMENT", 100, related: advance.Id); await Post(repay);
             var priorCompanyIncome = await Create("INCOME", 100000, today.AddMonths(-1)); await Post(priorCompanyIncome);
+            await Conflict(() => Create("CARRIED_ADVANCE", 200, today.AddDays(-3), reference: "carry-001"), "duplicate carried advance reference is rejected");
+            var beforeRepayment = (await bm.AdvancesAsync(new(AsOf: today.AddDays(-1), Search: advance.DocumentNumber), default)).Items.Single();
+            var balanceAfterRepayment = (await bm.AdvancesAsync(new(AsOf: today, Search: advance.DocumentNumber), default)).Items.Single();
+            Check(beforeRepayment.Repaid == 0 && beforeRepayment.Remaining == 400 && balanceAfterRepayment.Repaid == 100 && balanceAfterRepayment.Remaining == 300,
+                "advance balances respect the selected cutoff date");
+            var carriedRows = await bm.AdvancesAsync(new(AsOf: today.AddDays(-2), Search: "CARRY-001", CarriedOnly: true), default);
+            Check(carriedRows.Items.Single().Id == opening.Id && carriedRows.TotalAmount == 200 && carriedRows.TotalRemaining == 200,
+                "carried advances can be filtered by reference and as-of date");
+            using (var carriedExport = new XLWorkbook(new MemoryStream(await bm.ExportAsync("advances", new(AsOf: today.AddDays(-2), Search: "CARRY-001", CarriedOnly: true), default))))
+            {
+                var sheet = carriedExport.Worksheets.Single();
+                Check(sheet.Cell(7, 3).GetString() == "CARRY-001"
+                    && sheet.Cell(8, 1).GetString() is "TOTAL" or "الإجمالي"
+                    && sheet.Cell(8, 5).GetValue<double>() == 200
+                    && sheet.Cell(8, 6).GetValue<double>() == 0
+                    && sheet.Cell(8, 7).GetValue<double>() == 200,
+                    "carried advance Excel export includes the cutoff-filtered report and totals");
+            }
             await Conflict(() => Create("ADVANCE_REPAYMENT", 301, related: advance.Id), "over-repayment blocked");
             await Conflict(() => fr.ReverseJournalAsync(advance.JournalEntryId, new("test"), default), "direct reversal cannot orphan repayments");
             var balances = await bm.AdvancesAsync(today, null, null, default);
@@ -396,7 +414,15 @@ public sealed class AccountingBookIntegrationTests
             var filteredAdvances = await bm.AdvancesAsync(new(today, today, "Test employee", "CODEX-EMP", department.Id, "SETTLED"), default);
             Check(filteredAdvances.Items.Count == 1 && filteredAdvances.TotalAmount == 300 && filteredAdvances.TotalPaid == 300 && filteredAdvances.TotalRemaining == 0 && filteredAdvances.OpenCount == 0, "advance filters and backend dashboard totals match");
             using (var advanceExport = new XLWorkbook(new MemoryStream(await bm.ExportAsync("advances", new(From: today, To: today, Status: "SETTLED", DepartmentId: department.Id, EmployeeName: "Test employee", EmployeeNumber: "CODEX-EMP"), default))))
-                Check(advanceExport.Worksheets.Single().RowsUsed().Count() == 2, "filtered advances export contains only its header and matching record");
+            {
+                var sheet = advanceExport.Worksheets.Single();
+                Check(sheet.Cell(7, 4).GetString() == detailedAdvance.DocumentNumber
+                    && sheet.Cell(8, 1).GetString() is "TOTAL" or "الإجمالي"
+                    && sheet.Cell(8, 6).GetValue<double>() == 300
+                    && sheet.Cell(8, 7).GetValue<double>() == 300
+                    && sheet.Cell(8, 8).GetValue<double>() == 0,
+                    "filtered advances export includes the matching transaction and correctly calculated totals");
+            }
             await bm.DeleteAsync(finalPayment.Id, new(true, "Test cleanup"), default);
             await bm.DeleteAsync(partialPayment.Id, new(true, "Test cleanup"), default);
             await bm.DeleteAsync(detailedAdvance.Id, new(true, "Test cleanup"), default);

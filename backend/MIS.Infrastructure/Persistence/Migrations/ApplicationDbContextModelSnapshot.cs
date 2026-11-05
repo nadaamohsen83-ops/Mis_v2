@@ -6024,6 +6024,13 @@ namespace MIS.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ExternalIdentifier")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ImportedFieldsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
@@ -6045,6 +6052,9 @@ namespace MIS.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CustomerId")
                         .IsUnique();
+
+                    b.HasIndex("ExternalIdentifier")
+                        .HasFilter("\"ExternalIdentifier\" IS NOT NULL");
 
                     b.HasIndex("UpdatedAt");
 

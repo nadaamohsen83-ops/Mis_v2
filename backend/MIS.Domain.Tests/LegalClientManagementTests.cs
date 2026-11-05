@@ -33,6 +33,19 @@ public sealed class LegalClientManagementTests
     }
 
     [Fact]
+    public void Legal_import_data_is_retained_when_a_later_import_has_no_source_fields()
+    {
+        var assignment = new LegalClientAssignment(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow);
+        const string importedRecords = "[{\"Installment Unique ID\":\"0001\"}]";
+
+        assignment.SetImportedData("0001", importedRecords);
+        assignment.SetImportedData(null, null);
+
+        Assert.Equal("0001", assignment.ExternalIdentifier);
+        Assert.Equal(importedRecords, assignment.ImportedFieldsJson);
+    }
+
+    [Fact]
     public void Legal_client_document_stores_only_a_safe_file_name()
     {
         var document = new LegalClientDocument(

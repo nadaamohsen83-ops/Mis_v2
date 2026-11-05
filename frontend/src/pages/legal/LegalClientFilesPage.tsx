@@ -164,6 +164,29 @@ export function LegalClientFilesPage() {
         </section>
       ) : null}
 
+      {details.importedRecords?.length ? (
+        <section className="rounded-2xl border border-mis-border bg-white p-5 shadow-sm">
+          <h2 className="font-bold text-mis-navy">{l.text('بيانات الملف القانوني المستورد', 'Imported Legal File Data')}</h2>
+          <div className="mt-4 space-y-4">
+            {details.importedRecords.map((record, recordIndex) => (
+              <div className="rounded-xl border border-mis-border p-4" key={recordIndex}>
+                <h3 className="text-sm font-semibold text-slate-600">
+                  {l.text('سجل {number}', 'Record {number}').replace('{number}', l.number(recordIndex + 1))}
+                </h3>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {Object.entries(record).map(([field, value]) => (
+                    <div className="rounded-xl bg-slate-50 p-3" key={`${recordIndex}:${field}`}>
+                      <dt className="text-xs font-semibold text-slate-500">{importedFieldLabel(field, l.text)}</dt>
+                      <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-800" data-bidi={isImportedIdentifier(field) ? 'ltr' : undefined}>{value || '—'}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="space-y-4 rounded-2xl border border-mis-border bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div><h2 className="font-bold text-mis-navy">{l.text('ملف العميل', 'Client File')}</h2><p className="mt-1 text-sm text-slate-500">{l.text('الحالة وملاحظات الشؤون القانونية.', 'Legal status and notes.')}</p></div>
@@ -249,6 +272,29 @@ export function LegalClientFilesPage() {
       />
     </div>
   );
+}
+
+function importedFieldLabel(field: string, text: (arabic: string, english: string) => string) {
+  const labels: Record<string, [string, string]> = {
+    '#': ['#', '#'],
+    Branches: ['الفروع', 'Branches'],
+    'ID Number': ['الرقم القومي', 'National ID'],
+    'Installment Unique ID': ['الرقم الفريد للقسط', 'Installment Unique ID'],
+    'Cust Full Name': ['اسم العميل الكامل', 'Customer Full Name'],
+    serial: ['المسلسل', 'Serial'],
+    'تاريخ المحضر': ['تاريخ المحضر', 'Report Date'],
+    'رقم المحضر': ['رقم المحضر', 'Report Number'],
+    'النيابة': ['النيابة', 'Prosecution'],
+    'تاريخ الحكم': ['تاريخ الحكم', 'Judgment Date'],
+    'الحكم': ['الحكم', 'Judgment'],
+    Agency: ['الجهة', 'Agency'],
+  };
+  const label = labels[field];
+  return label ? text(label[0], label[1]) : field;
+}
+
+function isImportedIdentifier(field: string) {
+  return ['#', 'ID Number', 'Installment Unique ID', 'serial', 'رقم المحضر'].includes(field);
 }
 
 function Info({ label, value, ltr = false }: { label: string; value?: string | null; ltr?: boolean }) {

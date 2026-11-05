@@ -72,11 +72,11 @@ public sealed class LegalController(
     [Authorize(Policy = AuthorizationPolicies.LegalCaseManage)]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(ExcelImportLimits.RequestBytes)]
-    public async Task<LegalClientImportPreviewDto> PreviewClientImport(IFormFile file, CancellationToken token)
+    public async Task<LegalClientImportPreviewDto> PreviewClientImport(IFormFile file, Guid organizationId, CancellationToken token)
     {
         if (file is null) throw new HrValidationException("Select a client import file.");
         await using var stream = file.OpenReadStream();
-        return await clients.PreviewImportAsync(file.FileName, file.Length, stream, token);
+        return await clients.PreviewImportAsync(file.FileName, file.Length, stream, organizationId, token);
     }
 
     [HttpPost("client-imports")]

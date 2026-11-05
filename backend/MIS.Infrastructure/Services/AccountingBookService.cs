@@ -90,6 +90,18 @@ public sealed partial class AccountingBookService : IAccountingBookService
             if (existing.Amount != request.Amount || existing.Category != request.Category || existing.TransactionDate != request.TransactionDate || existing.AccountId != request.AccountId || existing.CounterAccountId != request.CounterAccountId || existing.Description != request.Description.Trim() || existing.EmployeeId != request.EmployeeId || existing.RelatedAdvanceId != request.RelatedAdvanceId || existing.Reference != (string.IsNullOrWhiteSpace(request.Reference) ? null : request.Reference.Trim()) || existing.PaymentMethod != (string.IsNullOrWhiteSpace(request.PaymentMethod) ? null : request.PaymentMethod.Trim()) || existing.Notes != (string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim())) throw new HrConflictException("This request was already used with different accounting data.");
             return await GetAsync(existing.Id, token);
         }
+        if (request.Category == "CARRIED_ADVANCE")
+        {
+            var reference = request.Reference?.Trim();
+            if (string.IsNullOrWhiteSpace(reference)) throw new HrValidationException("A reference is required for a carried advance.");
+            var duplicate = await db.AccountingBookEntries.AnyAsync(x =>
+                x.Category == "CARRIED_ADVANCE"
+                && x.EmployeeId == request.EmployeeId
+                && x.DeletedAt == null
+                && x.Reference != null
+                && x.Reference.ToLower() == reference.ToLower(), token);
+            if (duplicate) throw new HrConflictException("A carried advance with this employee and reference already exists.");
+        }
         if (request.Category == "ADVANCE_REPAYMENT") await ValidateRepayment(request.RelatedAdvanceId, request.Amount, request.EmployeeId, request.AccountId, request.TransactionDate, null, token);
         await ValidateAccounts(request.Category, request.AccountId, request.CounterAccountId, token);
         var result = await CreateRecordedEntry(request, null, source, token);
@@ -223,9 +235,20 @@ public sealed partial class AccountingBookService : IAccountingBookService
         if (filter.From.HasValue && filter.To.HasValue) CheckDates(filter.From.Value, filter.To.Value);
         if (filter.From.HasValue) CheckDates(filter.From.Value, filter.From.Value);
         if (filter.To.HasValue) CheckDates(filter.To.Value, filter.To.Value);
-        var q = ActiveAdvancesQuery();
-        if (filter.From.HasValue) q = q.Where(x => x.TransactionDate >= filter.From);
-        if (filter.To.HasValue) q = q.Where(x => x.TransactionDate <= filter.To);
+        var asOf = filter.AsOf ?? (filter.CarriedOnly ? Today() : (DateOnly?)null);
+        if (asOf.HasValue) CheckDates(asOf.Value, asOf.Value);
+        var q = asOf.HasValue
+            ? Entries().Where(x =>
+                (x.Category == "ADVANCE" || x.Category == "CARRIED_ADVANCE")
+                && x.TransactionDate <= asOf.Value
+                && (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED")
+                && !db.JournalEntries.Any(reversal =>
+                    reversal.ReversalOfJournalId == x.JournalEntryId
+                    && reversal.PostingDate <= asOf.Value
+                    && (reversal.Status == "POSTED" || reversal.Status == "REVERSED")))
+            : ActiveAdvancesQuery();
+        if (!asOf.HasValue && filter.From.HasValue) q = q.Where(x => x.TransactionDate >= filter.From);
+        if (!asOf.HasValue && filter.To.HasValue) q = q.Where(x => x.TransactionDate <= filter.To);
         if (filter.EmployeeId.HasValue) q = q.Where(x => x.EmployeeId == filter.EmployeeId);
         if (filter.DepartmentId.HasValue) q = q.Where(x => x.Employee!.DepartmentId == filter.DepartmentId);
         if (!string.IsNullOrWhiteSpace(filter.EmployeeName))
@@ -240,10 +263,51 @@ public sealed partial class AccountingBookService : IAccountingBookService
             var number = filter.EmployeeNumber.Trim().ToLower();
             q = q.Where(x => x.Employee!.EmployeeNumber.ToLower().Contains(number));
         }
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim().ToLower();
+            q = q.Where(x =>
+                x.DocumentNumber.ToLower().Contains(search)
+                || (x.Reference != null && x.Reference.ToLower().Contains(search))
+                || x.Description.ToLower().Contains(search)
+                || x.Employee!.EmployeeNumber.ToLower().Contains(search)
+                || x.Employee.FullName.ToLower().Contains(search)
+                || (x.Employee.FullNameArabic != null && x.Employee.FullNameArabic.ToLower().Contains(search))
+                || (x.Employee.FullNameEnglish != null && x.Employee.FullNameEnglish.ToLower().Contains(search)));
+        }
         var rows = await q.OrderByDescending(x => x.TransactionDate).ThenByDescending(x => x.CreatedAt).ToListAsync(token);
         var ids = rows.Select(x => x.Id).ToArray();
-        var repayments = await AdvanceRepayments(ids, token);
-        var advances = rows.Select(x => MapAdvance(x, repayments.GetValueOrDefault(x.Id))).ToArray();
+        Dictionary<Guid, decimal> repayments;
+        if (asOf.HasValue && ids.Length > 0)
+        {
+            repayments = await db.AccountingBookEntries.AsNoTracking()
+                .Where(x => x.RelatedAdvanceId != null
+                    && ids.Contains(x.RelatedAdvanceId.Value)
+                    && x.Category == "ADVANCE_REPAYMENT"
+                    && x.TransactionDate <= asOf.Value
+                    && (x.JournalEntry.Status == "POSTED" || x.JournalEntry.Status == "REVERSED")
+                    && !db.JournalEntries.Any(reversal =>
+                        reversal.ReversalOfJournalId == x.JournalEntryId
+                        && reversal.PostingDate <= asOf.Value
+                        && (reversal.Status == "POSTED" || reversal.Status == "REVERSED")))
+                .GroupBy(x => x.RelatedAdvanceId!.Value)
+                .Select(group => new { Id = group.Key, Amount = group.Sum(x => x.Amount) })
+                .ToDictionaryAsync(x => x.Id, x => x.Amount, token);
+        }
+        else
+        {
+            repayments = await AdvanceRepayments(ids, token);
+        }
+
+        var monthStart = asOf.HasValue ? new DateOnly(asOf.Value.Year, asOf.Value.Month, 1) : default;
+        var advances = rows.Select(x =>
+        {
+            var mapped = MapAdvance(x, repayments.GetValueOrDefault(x.Id));
+            return asOf.HasValue
+                ? mapped with { Carried = x.Category == "CARRIED_ADVANCE" || x.TransactionDate < monthStart }
+                : mapped;
+        }).ToArray();
+        if (filter.CarriedOnly) advances = advances.Where(x => x.Carried).ToArray();
         if (!string.IsNullOrWhiteSpace(filter.Status))
             advances = advances.Where(x => x.Status == filter.Status).ToArray();
         return new(advances, advances.Sum(x => x.Amount), advances.Sum(x => x.Repaid), advances.Sum(x => x.Remaining), advances.Count(x => x.Remaining > 0));

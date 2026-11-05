@@ -7,7 +7,10 @@ using MIS.Application.Common;
 
 namespace MIS.Infrastructure.Services;
 
-internal sealed record ParsedCollectionRow(int RowNumber, IReadOnlyDictionary<string, string> Values);
+internal sealed record ParsedCollectionRow(
+    int RowNumber,
+    IReadOnlyDictionary<string, string> Values,
+    IReadOnlyDictionary<string, string> OriginalValues);
 
 internal static class CollectionImportParser
 {
@@ -28,8 +31,8 @@ internal static class CollectionImportParser
     {
         var prefix = new byte[Math.Min(4096, (int)stream.Length)]; _ = await stream.ReadAsync(prefix, token); if (prefix.Any(x => x == 0)) throw new HrValidationException("The CSV file contains binary data."); stream.Position = 0;
         using var reader = new StreamReader(stream, new UTF8Encoding(false, true), true, leaveOpen: true); using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { BadDataFound = _ => throw new HrValidationException("The CSV file contains malformed data."), MissingFieldFound = null, TrimOptions = TrimOptions.Trim });
-        if (!await csv.ReadAsync() || !csv.ReadHeader()) throw new HrValidationException("The CSV file does not contain a header row."); var headers = ValidateHeaders(csv.HeaderRecord ?? []); var rows = new List<ParsedCollectionRow>();
-        while (await csv.ReadAsync()) { token.ThrowIfCancellationRequested(); if (rows.Count >= MaximumRows) throw new HrValidationException($"Collection imports cannot exceed {MaximumRows:N0} rows."); var values = headers.Select((header, index) => (header, value: Limit(csv.GetField(index)))).ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase); if (values.Values.All(string.IsNullOrWhiteSpace)) continue; rows.Add(new ParsedCollectionRow(csv.Parser.Row, values)); }
+        if (!await csv.ReadAsync() || !csv.ReadHeader()) throw new HrValidationException("The CSV file does not contain a header row."); var rawHeaders = csv.HeaderRecord ?? []; var headers = ValidateHeaders(rawHeaders); var rows = new List<ParsedCollectionRow>();
+        while (await csv.ReadAsync()) { token.ThrowIfCancellationRequested(); if (rows.Count >= MaximumRows) throw new HrValidationException($"Collection imports cannot exceed {MaximumRows:N0} rows."); var rawValues = rawHeaders.Select((header, index) => (header: Limit(header), value: Limit(csv.GetField(index)))).ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase); var values = headers.Select((header, index) => (header, value: rawValues[Limit(rawHeaders[index])])).ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase); if (values.Values.All(string.IsNullOrWhiteSpace)) continue; rows.Add(new ParsedCollectionRow(csv.Parser.Row, values, rawValues)); }
         if (rows.Count == 0) throw new HrValidationException("The import file does not contain data rows."); return rows;
     }
 
@@ -59,7 +62,7 @@ internal static class CollectionImportParser
             anySheet = true;
             if (!reader.Read()) continue;
             if (reader.FieldCount > MaximumColumns) throw new HrValidationException($"Collection imports cannot exceed {MaximumColumns} columns.");
-            var rawHeaders = Enumerable.Range(0, reader.FieldCount).Select(i => Limit(reader.GetValue(i)?.ToString())).ToArray();
+            var rawHeaders = Enumerable.Range(0, reader.FieldCount).Select(i => Limit(Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture))).ToArray();
             if (rawHeaders.All(string.IsNullOrWhiteSpace)) continue;
             var headers = ValidateHeaders(rawHeaders);
             var rowNumber = 1;
@@ -68,10 +71,15 @@ internal static class CollectionImportParser
                 token.ThrowIfCancellationRequested();
                 rowNumber++;
                 if (rows.Count >= MaximumRows) throw new HrValidationException($"Collection imports cannot exceed {MaximumRows:N0} rows.");
-                var values = headers.Select((header, index) => (header, value: Limit(Convert.ToString(reader.GetValue(index), CultureInfo.InvariantCulture)))).ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase);
+                var cellValues = Enumerable.Range(0, reader.FieldCount)
+                    .Select(index => FormatCellValue(reader.GetValue(index), rawHeaders[index], reader.GetNumberFormatString(index)))
+                    .ToArray();
+                var originalValues = rawHeaders.Select((header, index) => (header, value: cellValues[index]))
+                    .ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase);
+                var values = headers.Select((header, index) => (header, value: cellValues[index])).ToDictionary(x => x.header, x => x.value, StringComparer.OrdinalIgnoreCase);
                 if (values.Values.All(string.IsNullOrWhiteSpace)) continue;
                 if (!string.IsNullOrWhiteSpace(sheetName)) values["_sheet"] = sheetName;
-                rows.Add(new ParsedCollectionRow(++globalRow, values));
+                rows.Add(new ParsedCollectionRow(++globalRow, values, originalValues));
             }
         } while (reader.NextResult());
         if (!anySheet) throw new HrValidationException("The selected worksheet was not found.");
@@ -81,8 +89,42 @@ internal static class CollectionImportParser
 
     private static string[] ValidateHeaders(string[] headers)
     {
-        if (headers.Length == 0 || headers.Length > MaximumColumns) throw new HrValidationException("The import header count is invalid."); var normalized = headers.Select(NormalizeHeader).ToArray(); if (normalized.Any(string.IsNullOrWhiteSpace)) throw new HrValidationException("Every import column must have a header."); if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length) throw new HrValidationException("Import column headers must be unique."); return normalized;
+        if (headers.Length == 0 || headers.Length > MaximumColumns) throw new HrValidationException("The import header count is invalid.");
+        if (headers.Any(string.IsNullOrWhiteSpace)) throw new HrValidationException("Every import column must have a header.");
+        var normalized = headers.Select((header, index) =>
+        {
+            var key = NormalizeHeader(header);
+            return key.Length == 0 ? $"column{index + 1}" : key;
+        }).ToArray();
+        if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length) throw new HrValidationException("Import column headers must be unique.");
+        return normalized;
     }
+
     internal static string NormalizeHeader(string? value) => new((value ?? string.Empty).Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+    private static string FormatCellValue(object? value, string? header, string? numberFormat)
+    {
+        if (value is null) return string.Empty;
+        if (value is DateTime dateTime) return Limit(dateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        if (value is double number)
+        {
+            var normalizedHeader = NormalizeHeader(header);
+            if (normalizedHeader is "تاريخالمحضر" or "تاريخالحكم")
+            {
+                try { return Limit(DateTime.FromOADate(number).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)); }
+                catch (ArgumentException) { }
+            }
+
+            if (numberFormat is { Length: > 0 } format && format.All(character => character == '0')
+                && number >= 0 && number <= long.MaxValue && number == Math.Truncate(number))
+                return Limit(Convert.ToInt64(number, CultureInfo.InvariantCulture).ToString($"D{format.Length}", CultureInfo.InvariantCulture));
+
+            if (normalizedHeader is "idnumber" or "installmentuniqueid" or "serial" or "رقمالمحضر")
+                return Limit(number.ToString("0", CultureInfo.InvariantCulture));
+        }
+
+        return Limit(Convert.ToString(value, CultureInfo.InvariantCulture));
+    }
+
     private static string Limit(string? value) { var result = value?.Trim() ?? string.Empty; if (result.Length > 4000) throw new HrValidationException("An import cell exceeds 4,000 characters."); return result; }
 }

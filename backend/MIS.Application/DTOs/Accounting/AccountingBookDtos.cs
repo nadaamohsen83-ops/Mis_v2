@@ -26,7 +26,17 @@ public sealed record AccountingProfitLossCategoryDto(
 /// <summary>A posted journal movement contributing to a profit and loss category.</summary>
 public sealed record AccountingProfitLossTransactionDto(
     DateOnly Date, string? JournalNumber, string Description, decimal Amount);
-public sealed record AccountingAdvancesFilter(DateOnly? From = null, DateOnly? To = null, string? EmployeeName = null, string? EmployeeNumber = null, Guid? DepartmentId = null, string? Status = null, Guid? EmployeeId = null);
+public sealed record AccountingAdvancesFilter(
+    DateOnly? From = null,
+    DateOnly? To = null,
+    string? EmployeeName = null,
+    string? EmployeeNumber = null,
+    Guid? DepartmentId = null,
+    string? Status = null,
+    Guid? EmployeeId = null,
+    DateOnly? AsOf = null,
+    string? Search = null,
+    bool CarriedOnly = false);
 public sealed record AccountingAdvancesResultDto(IReadOnlyList<AccountingAdvanceDto> Items, decimal TotalAmount, decimal TotalPaid, decimal TotalRemaining, int OpenCount);
 public sealed record AccountingAdvanceDto(Guid Id, string DocumentNumber, Guid EmployeeId, string EmployeeNumber, string EmployeeName, string? DepartmentName, Guid? DepartmentId,
     DateOnly Date, decimal Amount, decimal Repaid, decimal Remaining, string Reason, string? PaymentMethod, string? Reference, string? Notes,
@@ -41,7 +51,7 @@ public sealed record SaveRecurringExpenseRequest([Required, MaxLength(200)] stri
 public sealed record GenerateRecurringExpensesRequest([Range(2000, 2100)] int Year, [Range(1, 12)] int Month);
 public sealed record GenerateRecurringExpensesResult(int Created, int AlreadyGenerated, int OutsideSchedule, int NotDue = 0);
 public sealed record ConfirmAccountingDeletionRequest(bool Confirmed, [MaxLength(1000)] string? Reason = null);
-public sealed record AccountingExportFilter(DateOnly? From = null, DateOnly? To = null, int? Year = null, int? Month = null, string? Category = null, string? Status = null, string? Search = null, Guid? PeriodId = null, DateOnly? AsOf = null, Guid? DepartmentId = null, string? EmployeeName = null, string? EmployeeNumber = null);
+public sealed record AccountingExportFilter(DateOnly? From = null, DateOnly? To = null, int? Year = null, int? Month = null, string? Category = null, string? Status = null, string? Search = null, Guid? PeriodId = null, DateOnly? AsOf = null, Guid? DepartmentId = null, string? EmployeeName = null, string? EmployeeNumber = null, bool CarriedOnly = false);
 public sealed record AccountingCommissionPreviewRowDto(string Scope, Guid UserId, string Name, int CaseCount, decimal Collected, decimal Commission, string RuleCode, string Basis, decimal? Percentage, decimal? FixedAmount, bool Locked);
 public sealed record AccountingCommissionPreviewDto(int Year, int Month, decimal ApprovedCollections, IReadOnlyList<AccountingCommissionPreviewRowDto> Rows, IReadOnlyList<string> MissingRuleScopes);
 public sealed record AccountingPaidSource(string Kind, Guid Id, string Category, decimal Amount, Guid? EmployeeId, string Description, DateOnly PaidOn, decimal Transportation = 0, decimal Commissions = 0, decimal Bonuses = 0);

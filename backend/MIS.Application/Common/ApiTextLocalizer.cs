@@ -23,6 +23,8 @@ public static partial class ApiTextLocalizer
             ["Choose an accounting date no later than today."] = "اختر تاريخ حركة لا يتجاوز تاريخ اليوم.",
             ["Use a positive amount with at most two decimal places."] = "أدخل مبلغًا أكبر من صفر وبحد أقصى منزلتين عشريتين.",
             ["An employee is required for an advance."] = "اختر الموظف صاحب السلفة.",
+            ["A reference is required for a carried advance."] = "أدخل رقم المستند أو المرجع للسلفة المرحلة.",
+            ["A carried advance with this employee and reference already exists."] = "يوجد رصيد سلفة مرحل بهذا المرجع للموظف نفسه.",
             ["Choose a posted employee advance to settle."] = "اختر سلفة موظف مسجلة لتسجيل سداد عليها.",
             ["Confirm deletion before removing this accounting record."] = "راجع بيانات الحركة وأكّد الحذف أولًا.",
             ["Delete the advance repayments before deleting the original advance."] = "السلفة مرتبطة بسداد. احذف حركات السداد المرتبطة بها أولًا ثم احذف السلفة.",

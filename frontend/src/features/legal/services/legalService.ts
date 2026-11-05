@@ -77,14 +77,15 @@ export const legalService = {
     await apiClient.delete(`/legal/client-documents/${documentId}`);
   },
 
-  async previewClientImport(file: File) {
+  async previewClientImport(file: File, organizationId: string) {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('organizationId', organizationId);
     return requestFormData<LegalClientImportPreview>('/legal/client-imports/preview', formData);
   },
 
-  async importClients(fileName: string, rows: LegalClientImportSourceRow[]) {
-    return (await apiClient.post<LegalClientImportResult>('/legal/client-imports', { fileName, rows })).data;
+  async importClients(fileName: string, organizationId: string, rows: LegalClientImportSourceRow[]) {
+    return (await apiClient.post<LegalClientImportResult>('/legal/client-imports', { fileName, organizationId, rows })).data;
   },
 
   async cases(params: { search?: string; organizationId?: string; stage?: string; page?: number; pageSize?: number }) {

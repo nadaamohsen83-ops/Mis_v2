@@ -126,7 +126,12 @@ public sealed class LegalClientService(
         return await MapDetailsAsync(customer, token);
     }
 
-    public async Task<LegalClientImportPreviewDto> PreviewImportAsync(string fileName, long length, Stream content, CancellationToken token)
+    public async Task<LegalClientImportPreviewDto> PreviewImportAsync(
+        string fileName,
+        long length,
+        Stream content,
+        Guid organizationId,
+        CancellationToken token)
     {
         RequireManage();
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
@@ -140,7 +145,7 @@ public sealed class LegalClientService(
 
         var rowOffset = extension == ".csv" ? 0 : 1;
         var sources = parsed.Select(row => MapImportRow(row, rowOffset)).ToArray();
-        var evaluated = await EvaluateRowsAsync(sources, token);
+        var evaluated = await EvaluateRowsAsync(sources, organizationId, token);
         var previewRows = evaluated.Select(row => new LegalClientImportPreviewRowDto(
             row.Source, row.Status, LocalizedCustomerName(row.Customer), row.Errors)).ToArray();
         var valid = previewRows.Count(row => row.Status is "VALID" or "EXISTING");
@@ -166,8 +171,10 @@ public sealed class LegalClientService(
             throw new HrValidationException("Import row numbers must be unique and start at row 2 or later.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-        var evaluated = await EvaluateRowsAsync(request.Rows, token);
+        var evaluated = await EvaluateRowsAsync(request.Rows, request.OrganizationId, token);
         var results = new List<LegalClientImportRowResultDto>(evaluated.Count);
+        var newCustomers = new Dictionary<string, CollectionCustomer>(StringComparer.OrdinalIgnoreCase);
+        var assignments = new Dictionary<Guid, LegalClientAssignment>();
         var succeeded = 0;
         foreach (var row in evaluated)
         {
@@ -177,10 +184,16 @@ public sealed class LegalClientService(
                 continue;
             }
 
-            var customer = row.Customer ?? CreateCustomer(row);
-            if (row.Customer is null)
+            var customerKey = ImportCustomerKey(row);
+            var customer = row.Customer;
+            if (customer is null && customerKey is not null && newCustomers.TryGetValue(customerKey, out var createdCustomer))
+                customer = createdCustomer;
+            var isNewCustomer = customer is null;
+            customer ??= CreateCustomer(row);
+            if (isNewCustomer)
             {
                 db.CollectionCustomers.Add(customer);
+                if (customerKey is not null) newCustomers[customerKey] = customer;
             }
             else
             {
@@ -195,10 +208,23 @@ public sealed class LegalClientService(
                     addressEnglish);
             }
             var now = DateTimeOffset.UtcNow;
-            var assignment = new LegalClientAssignment(customer.Id, user.UserId, now);
-            if (!string.IsNullOrWhiteSpace(row.Source.Notes))
-                assignment.Update("ACTIVE", row.Source.Notes, user.UserId, now);
-            db.LegalClientAssignments.Add(assignment);
+            if (!assignments.TryGetValue(customer.Id, out var assignment))
+            {
+                assignment = await db.LegalClientAssignments.SingleOrDefaultAsync(x => x.CustomerId == customer.Id, token);
+                if (assignment is not null) assignments[customer.Id] = assignment;
+            }
+            if (assignment is null)
+            {
+                assignment = new LegalClientAssignment(customer.Id, user.UserId, now);
+                if (!string.IsNullOrWhiteSpace(row.Source.Notes))
+                    assignment.Update("ACTIVE", row.Source.Notes, user.UserId, now);
+                db.LegalClientAssignments.Add(assignment);
+                assignments[customer.Id] = assignment;
+            }
+            var importedRecordsJson = AppendImportedRecord(assignment.ImportedFieldsJson, row.Source.OriginalFields);
+            assignment.SetImportedData(
+                row.Source.ExternalIdentifier,
+                importedRecordsJson);
             AddAudit("LegalClientImported", customer.Id, null, new { request.FileName, row.Source.RowNumber });
             results.Add(new LegalClientImportRowResultDto(row.Source.RowNumber, "IMPORTED", []));
             succeeded++;
@@ -333,15 +359,22 @@ public sealed class LegalClientService(
             customer.CreatedAt,
             caseNumbers,
             documents,
-            CanManage());
+            CanManage(),
+            assignment?.ImportedFieldsJson is { Length: > 0 } importedFieldsJson
+                ? JsonSerializer.Deserialize<List<Dictionary<string, string>>>(importedFieldsJson)
+                : null);
     }
 
     private async Task<IReadOnlyList<EvaluatedRow>> EvaluateRowsAsync(
         IReadOnlyCollection<LegalClientImportSourceRow> rows,
+        Guid organizationId,
         CancellationToken token)
     {
-        var organizations = await db.CollectionClientOrganizations.AsNoTracking()
-            .Where(x => x.IsActive).ToArrayAsync(token);
+        if (organizationId == Guid.Empty)
+            throw new HrValidationException("Select the MIS organization for the imported clients.");
+        var organization = await db.CollectionClientOrganizations.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == organizationId && x.IsActive, token)
+            ?? throw new HrValidationException("The selected MIS organization is not active.");
         var evaluated = new List<EvaluatedRow>(rows.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in rows)
@@ -349,9 +382,9 @@ public sealed class LegalClientService(
             var errors = new List<string>();
             var sourceName = ImportName(source);
             if (sourceName is null) errors.Add("Client name is required.");
-            if (string.IsNullOrWhiteSpace(source.NationalId) && string.IsNullOrWhiteSpace(source.MobileNumber))
-                errors.Add("National ID or mobile number is required.");
-            if (string.IsNullOrWhiteSpace(source.BankName)) errors.Add("Bank name is required.");
+            if (string.IsNullOrWhiteSpace(source.NationalId) && string.IsNullOrWhiteSpace(source.MobileNumber)
+                && string.IsNullOrWhiteSpace(source.ExternalIdentifier))
+                errors.Add("National ID, mobile number, or installment unique ID is required.");
             if (source.Name?.Length > 200) errors.Add("Client name cannot exceed 200 characters.");
             if (source.NameArabic?.Length > 200 || source.NameEnglish?.Length > 200)
                 errors.Add("Client name cannot exceed 200 characters.");
@@ -361,27 +394,70 @@ public sealed class LegalClientService(
             if (source.AddressArabic?.Length > 600 || source.AddressEnglish?.Length > 600)
                 errors.Add("Address cannot exceed 600 characters.");
             if (source.Notes?.Length > 2000) errors.Add("Notes cannot exceed 2,000 characters.");
-            if (source.BankName?.Length > 200) errors.Add("Bank name cannot exceed 200 characters.");
+            if (source.ExternalIdentifier?.Length > 128) errors.Add("Installment Unique ID cannot exceed 128 characters.");
+            if (source.OriginalFields is { Count: > 100 }
+                || source.OriginalFields?.Any(field => string.IsNullOrWhiteSpace(field.Key) || field.Key.Length > 100
+                    || field.Value is null || field.Value.Length > 4000) == true)
+                errors.Add("Original workbook fields contain an invalid header or value.");
+            else if (source.OriginalFields?.Sum(field => field.Key.Length + field.Value.Length) > 20_000)
+                errors.Add("Original workbook fields exceed the supported size.");
 
-            var organizationMatches = organizations.Where(organization =>
-                string.Equals(organization.Code, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)
-                || string.Equals(organization.NameEnglish, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)
-                || string.Equals(organization.NameArabic, source.BankName?.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
-            ClientOrganization? organization = organizationMatches.Length == 1 ? organizationMatches[0] : null;
-            if (organizationMatches.Length == 0 && !string.IsNullOrWhiteSpace(source.BankName))
-                errors.Add("Bank name does not match an active MIS organization.");
-            if (organizationMatches.Length > 1)
-                errors.Add("Bank name matches more than one organization; use its unique name or code.");
-
-            var duplicateKey = ImportDuplicateKey(source, organization?.Id);
-            if (duplicateKey is not null && !seen.Add(duplicateKey))
+            var duplicateKeys = ImportDuplicateKeys(source, organizationId).ToArray();
+            if (duplicateKeys.Any(key => seen.Contains(key)))
                 errors.Add("This client appears more than once in the uploaded file.");
+            foreach (var duplicateKey in duplicateKeys)
+                seen.Add(duplicateKey);
 
             CollectionCustomer? customer = null;
-            if (organization is not null && errors.Count == 0)
+            if (Normalize(source.ExternalIdentifier) is { } externalIdentifier)
+            {
+                var matchingAssignments = await db.LegalClientAssignments
+                    .Where(assignment => assignment.ExternalIdentifier == externalIdentifier)
+                    .Take(2)
+                    .Select(assignment => assignment.Customer)
+                    .ToArrayAsync(token);
+                if (matchingAssignments.Length > 1)
+                    errors.Add("Installment Unique ID matches more than one customer.");
+                else if (matchingAssignments.Length == 1)
+                {
+                    if (HasMatchingName(matchingAssignments[0], source))
+                        customer = matchingAssignments[0];
+                    else
+                        errors.Add("Installment Unique ID does not match the customer name.");
+                }
+            }
+
+            if (Normalize(source.NationalId) is { } nationalId && errors.Count == 0)
+            {
+                var matchingCustomers = await db.CollectionCustomers
+                    .Where(customer => customer.NationalId == nationalId)
+                    .Take(2)
+                    .ToArrayAsync(token);
+                if (matchingCustomers.Length > 1)
+                    errors.Add("National ID matches more than one customer.");
+                else if (matchingCustomers.Length == 1)
+                {
+                    if (HasMatchingName(matchingCustomers[0], source))
+                    {
+                        if (customer is not null && customer.Id != matchingCustomers[0].Id)
+                            errors.Add("National ID and installment ID refer to different customers.");
+                        else
+                            customer = matchingCustomers[0];
+                    }
+                    else
+                        errors.Add("National ID does not match the customer name.");
+                }
+            }
+
+            if (customer is null && errors.Count == 0)
                 customer = await FindCustomerAsync(organization.Id, source, token);
-            if (customer is not null && await IsLegalClientAsync(customer.Id, token))
-                errors.Add("This customer is already assigned to Legal.");
+            if (customer is not null && Normalize(source.NationalId) is { } importedNationalId
+                && Normalize(customer.NationalId) is { } existingNationalId
+                && !string.Equals(importedNationalId, existingNationalId, StringComparison.Ordinal))
+                errors.Add("National ID does not match the identified customer.");
+            if (customer is not null && Normalize(source.ExternalIdentifier) is not null
+                && Normalize(source.NationalId) is null && !HasMatchingName(customer, source))
+                errors.Add("Installment Unique ID does not match the customer name.");
             var status = errors.Count > 0 ? (errors.Any(error => error.Contains("appears more than once", StringComparison.Ordinal)
                 || error.Contains("already assigned", StringComparison.Ordinal)) ? "DUPLICATE" : "INVALID")
                 : customer is null ? "VALID" : "EXISTING";
@@ -392,14 +468,6 @@ public sealed class LegalClientService(
 
     private async Task<CollectionCustomer?> FindCustomerAsync(Guid organizationId, LegalClientImportSourceRow source, CancellationToken token)
     {
-        var nationalId = Normalize(source.NationalId);
-        if (nationalId is not null)
-        {
-            var customer = await db.CollectionCustomers.SingleOrDefaultAsync(
-                x => x.OrganizationId == organizationId && x.NationalId == nationalId, token);
-            if (customer is not null) return customer;
-        }
-
         var phone = Normalize(source.MobileNumber);
         if (phone is null) return null;
         var (nameArabic, nameEnglish) = ImportNames(source);
@@ -444,9 +512,6 @@ public sealed class LegalClientService(
             throw new HrNotFoundException("Legal client was not found.");
     }
 
-    private async Task<bool> IsLegalClientAsync(Guid customerId, CancellationToken token) =>
-        await LegalClients().AnyAsync(x => x.Id == customerId, token);
-
     private Task<bool> HasLegalCaseAsync(Guid customerId, CancellationToken token) =>
         db.CollectionCases.AnyAsync(x => x.CustomerId == customerId
             && !x.IsArchived && x.Status == CollectionsValues.CaseStatuses.Legal, token);
@@ -472,7 +537,7 @@ public sealed class LegalClientService(
             document.Id, document.OriginalFileName, document.ContentType, document.FileSize,
             document.UploadedByUser.FullName, document.UploadedAt));
 
-    private static LegalClientImportSourceRow MapImportRow(ParsedCollectionRow row, int rowOffset)
+    internal static LegalClientImportSourceRow MapImportRow(ParsedCollectionRow row, int rowOffset)
     {
         var nameArabic = Get(row.Values, "namearabic", "arabicname", "clientnamearabic", "customernamearabic", "اسم العميل بالعربي", "الاسم بالعربي");
         var nameEnglish = Get(row.Values, "nameenglish", "englishname", "clientnameenglish", "customernameenglish", "اسم العميل بالإنجليزي", "الاسم بالإنجليزي");
@@ -480,7 +545,7 @@ public sealed class LegalClientService(
         var addressEnglish = Get(row.Values, "addressenglish", "englishaddress", "العنوان بالإنجليزي");
         return new LegalClientImportSourceRow(
             Math.Max(row.RowNumber + rowOffset, 2),
-            Get(row.Values, "name", "clientname", "customername", "fullname", "customerfullname", "clientfullname", "الاسم", "اسم العميل", "الاسم الكامل") ?? nameArabic ?? nameEnglish,
+            Get(row.Values, "name", "clientname", "customername", "fullname", "customerfullname", "clientfullname", "custfullname", "الاسم", "اسم العميل", "الاسم الكامل") ?? nameArabic ?? nameEnglish,
             nameArabic,
             nameEnglish,
             Get(row.Values, "nationalid", "nationalidnumber", "nationalnumber", "identitynumber", "idnumber", "nationalidentitynumber", "الرقم القومي", "رقم قومي", "الرقم الوطني", "رقم الهوية"),
@@ -489,7 +554,22 @@ public sealed class LegalClientService(
             Get(row.Values, "address", "clientaddress", "العنوان") ?? addressArabic ?? addressEnglish,
             addressArabic,
             addressEnglish,
-            Get(row.Values, "notes", "note", "ملاحظات"));
+            Get(row.Values, "notes", "note", "ملاحظات"),
+            Get(row.Values, "installmentuniqueid", "externalidentifier", "customeruniqueid", "installmentid"),
+            IsTargetLegalWorkbook(row.OriginalValues) ? row.OriginalValues : null);
+    }
+
+    private static bool IsTargetLegalWorkbook(IReadOnlyDictionary<string, string> originalValues)
+    {
+        string[] requiredHeaders =
+        [
+            "#", "Branches", "ID Number", "Installment Unique ID", "Cust Full Name", "serial",
+            "تاريخ المحضر", "رقم المحضر", "النيابة", "تاريخ الحكم", "الحكم", "Agency",
+        ];
+        var actual = originalValues.Keys.Select(CollectionImportParser.NormalizeHeader).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return originalValues.Count == requiredHeaders.Length
+            && actual.Count == requiredHeaders.Length
+            && requiredHeaders.All(header => actual.Contains(CollectionImportParser.NormalizeHeader(header)));
     }
 
     private static string? Get(IReadOnlyDictionary<string, string> values, params string[] aliases)
@@ -500,16 +580,73 @@ public sealed class LegalClientService(
             : null;
     }
 
-    private static string? ImportDuplicateKey(LegalClientImportSourceRow row, Guid? organizationId)
+    private static IEnumerable<string> ImportDuplicateKeys(LegalClientImportSourceRow row, Guid? organizationId)
     {
-        if (!organizationId.HasValue) return null;
-        var identity = Normalize(row.NationalId)
-            ?? (Normalize(row.MobileNumber) is { } phone ? $"{phone}:{ImportName(row)?.ToLowerInvariant()}" : null);
+        if (!organizationId.HasValue) yield break;
+        var nationalId = Normalize(row.NationalId);
+        var externalIdentifier = Normalize(row.ExternalIdentifier);
+        if (row.OriginalFields is not null)
+        {
+            if (externalIdentifier is not null) yield return $"{organizationId}:E:{externalIdentifier}";
+            else if (nationalId is not null) yield return $"{organizationId}:N:{nationalId}";
+            yield break;
+        }
+
+        if (nationalId is not null) yield return $"{organizationId}:N:{nationalId}";
+        if (externalIdentifier is not null) yield return $"{organizationId}:E:{externalIdentifier}";
+        if (nationalId is null && externalIdentifier is null
+            && Normalize(row.MobileNumber) is { } phone && ImportName(row) is { } name)
+            yield return $"{organizationId}:P:{phone}:{name}";
+    }
+
+    private static string? ImportCustomerKey(EvaluatedRow row)
+    {
+        if (row.Organization is null) return null;
+        var organizationId = row.Customer?.OrganizationId ?? row.Organization.Id;
+        var identity = Normalize(row.Source.NationalId)
+            ?? Normalize(row.Source.ExternalIdentifier)
+            ?? (Normalize(row.Source.MobileNumber) is { } phone && ImportName(row.Source) is { } name
+                ? $"{phone}:{name.ToLowerInvariant()}"
+                : null);
         return identity is null ? null : $"{organizationId}:{identity}";
+    }
+
+    private static string? AppendImportedRecord(
+        string? existingJson,
+        IReadOnlyDictionary<string, string>? importedFields)
+    {
+        if (importedFields is not { Count: > 0 }) return existingJson;
+        List<Dictionary<string, string>> records = string.IsNullOrWhiteSpace(existingJson)
+            ? []
+            : JsonSerializer.Deserialize<List<Dictionary<string, string>>>(existingJson) ?? [];
+        var record = importedFields.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var alreadySaved = records.Any(saved => saved.Count == record.Count
+            && saved.All(pair => record.TryGetValue(pair.Key, out var value)
+                && string.Equals(pair.Value, value, StringComparison.Ordinal)));
+        if (!alreadySaved) records.Add(record);
+        return JsonSerializer.Serialize(records);
     }
 
     private static string? ImportName(LegalClientImportSourceRow row) =>
         Normalize(row.Name) ?? Normalize(row.NameArabic) ?? Normalize(row.NameEnglish);
+
+    private static bool HasMatchingName(CollectionCustomer customer, LegalClientImportSourceRow source)
+    {
+        var (nameArabic, nameEnglish) = ImportNames(source);
+        var hasComparableName = false;
+        var matchesComparableName = false;
+        if (nameArabic is not null && Normalize(customer.FullNameArabic) is { } existingArabic)
+        {
+            hasComparableName = true;
+            matchesComparableName |= string.Equals(nameArabic, existingArabic, StringComparison.OrdinalIgnoreCase);
+        }
+        if (nameEnglish is not null && Normalize(customer.FullNameEnglish) is { } existingEnglish)
+        {
+            hasComparableName = true;
+            matchesComparableName |= string.Equals(nameEnglish, existingEnglish, StringComparison.OrdinalIgnoreCase);
+        }
+        return !hasComparableName || matchesComparableName;
+    }
 
     private static (string? Arabic, string? English) ImportNames(LegalClientImportSourceRow row)
     {

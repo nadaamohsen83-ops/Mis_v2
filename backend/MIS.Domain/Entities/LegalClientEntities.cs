@@ -23,6 +23,8 @@ public sealed class LegalClientAssignment
     public CollectionCustomer Customer { get; private set; } = null!;
     public string Status { get; private set; } = "ACTIVE";
     public string? Notes { get; private set; }
+    public string? ExternalIdentifier { get; private set; }
+    public string? ImportedFieldsJson { get; private set; }
     public Guid CreatedByUserId { get; private set; }
     public User CreatedByUser { get; private set; } = null!;
     public Guid UpdatedByUserId { get; private set; }
@@ -38,6 +40,14 @@ public sealed class LegalClientAssignment
         Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         UpdatedByUserId = updatedByUserId;
         UpdatedAt = updatedAt;
+    }
+
+    public void SetImportedData(string? externalIdentifier, string? importedFieldsJson)
+    {
+        if (string.IsNullOrWhiteSpace(ExternalIdentifier) && !string.IsNullOrWhiteSpace(externalIdentifier))
+            ExternalIdentifier = externalIdentifier.Trim();
+        if (!string.IsNullOrWhiteSpace(importedFieldsJson))
+            ImportedFieldsJson = importedFieldsJson;
     }
 }
 
